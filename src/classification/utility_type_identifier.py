@@ -1,8 +1,6 @@
 # src/classification/utility_type_identifier.py
 import joblib
-import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 
 class UtilityTypeIdentifier:
     """
@@ -29,13 +27,34 @@ class UtilityTypeIdentifier:
         Возвращает предсказанный тип (строка).
         """
         if self.model is None:
-            # Заглушка: случайный тип, но с учётом некоторых правил
-            # Например, если есть тепловая аномалия, исключаем газ
-            if features_dict.get('has_thermal_anomaly', 0) == 1:
-                possible = ['electricity', 'heating', 'water', 'sewage', 'communication']
-            else:
-                possible = self.types
-            return np.random.choice(possible)
+            # Детерминированный fallback без случайности.
+            # Нужен для стабильных результатов в тестах и при повторных запусках.
+            has_thermal = int(features_dict.get('has_thermal_anomaly', 0) or 0)
+            gradient = float(features_dict.get('magnetic_gradient', 0.0) or 0.0)
+            rho_value = float(features_dict.get('rho_value', 0.0) or 0.0)
+            near_road = int(features_dict.get('near_road', 0) or 0)
+            linear_extent = float(features_dict.get('linear_extent_m', 0.0) or 0.0)
+
+            # Тепловая аномалия чаще указывает на теплотрассу.
+            if has_thermal == 1:
+                return 'heating'
+
+            # Высокий магнитный градиент рядом с дорогой — вероятнее кабель/электрика.
+            if gradient >= 3.0 and near_road == 1:
+                return 'electricity'
+
+            # Низкое удельное сопротивление часто связано с водонасыщенными/канализационными зонами.
+            if 0 < rho_value < 80:
+                return 'sewage'
+
+            if 80 <= rho_value < 150:
+                return 'water'
+
+            # Протяжённые линейные сигнатуры чаще похожи на магистральные трубопроводы.
+            if linear_extent >= 30:
+                return 'gas'
+
+            return 'communication'
 
         # Создаём DataFrame из одного образца
         df = pd.DataFrame([features_dict])[self.feature_names]

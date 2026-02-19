@@ -4,6 +4,7 @@ geopandas
 shapely
 rasterio
 fiona
+pandas
 # База данных
 psycopg2-binary
 sqlalchemy
@@ -26,7 +27,9 @@ lxml
 matplotlib
 # AI-агент
 langchain
+langchain-community
 langchain-anthropic
 pydantic
+requests
 # Тестирование
 pytest
