@@ -23,16 +23,7 @@ from pathlib import Path
 from shapely.geometry import LineString, Point, Polygon, shape
 from typing import Optional, Union
 
-from config.settings import (
-    OVERPASS_URL,
-    OVERPASS_TIMEOUT,
-    OVERPASS_CACHE_DIR,
-    OVERPASS_CACHE_TTL,
-    OSM_UTILITY_TAGS,
-    OSM_SUBSTANCE_MAP,
-    CRS_WGS84,
-    CRS_UTM37N,
-)
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +35,7 @@ logger = logging.getLogger(__name__)
 def _cache_path(query: str) -> Path:
     """Возвращает путь к файлу кеша для данного запроса."""
     key = hashlib.md5(query.encode()).hexdigest()
-    cache_dir = Path(OVERPASS_CACHE_DIR)
+    cache_dir = Path(settings.OVERPASS_CACHE_DIR)
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / f"{key}.json"
 
@@ -54,7 +45,7 @@ def _is_cache_valid(path: Path) -> bool:
     if not path.exists():
         return False
     age = time.time() - path.stat().st_mtime
-    return age < OVERPASS_CACHE_TTL
+    return age < settings.OVERPASS_CACHE_TTL
 
 
 def _execute_query(query: str, use_cache: bool = True) -> dict:
@@ -82,9 +73,9 @@ def _execute_query(query: str, use_cache: bool = True) -> dict:
 
     logger.info("OSM: отправляем запрос к Overpass API...")
     response = requests.post(
-        OVERPASS_URL,
+        settings.OVERPASS_URL,
         data={"data": query},
-        timeout=OVERPASS_TIMEOUT,
+        timeout=settings.OVERPASS_TIMEOUT,
     )
     response.raise_for_status()
 
@@ -129,7 +120,7 @@ def _build_bbox_query(bbox: tuple) -> str:
     union_body = "\n  ".join(tag_filters)
 
     query = f"""
-[out:json][timeout:{OVERPASS_TIMEOUT}];
+[out:json][timeout:{settings.OVERPASS_TIMEOUT}];
 (
   {union_body}
 );
@@ -152,7 +143,7 @@ def _build_area_query(area_name: str) -> str:
         Строка запроса Overpass QL
     """
     query = f"""
-[out:json][timeout:{OVERPASS_TIMEOUT}];
+[out:json][timeout:{settings.OVERPASS_TIMEOUT}];
 area["name"="{area_name}"]["boundary"="administrative"]->.search_area;
 (
   way["man_made"="pipeline"](area.search_area);
@@ -238,10 +229,10 @@ def _parse_overpass_response(data: dict) -> gpd.GeoDataFrame:
                      "diameter", "depth", "location", "operator", "layer",
                      "pressure", "start_date", "name", "_raw_tags"],
             geometry="geometry",
-            crs=CRS_WGS84,
+            crs=settings.CRS_WGS84,
         )
 
-    gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=CRS_WGS84)
+    gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=settings.CRS_WGS84)
     logger.info(f"OSM: загружено {len(gdf)} объектов коммуникаций")
     return gdf
 
@@ -252,16 +243,16 @@ def _normalize_type(tags: dict) -> str:
     Приоритет: substance > power > man_made/waterway
     """
     substance = tags.get("substance", "").lower()
-    if substance in OSM_SUBSTANCE_MAP:
-        return OSM_SUBSTANCE_MAP[substance]
+    if substance in settings.OSM_SUBSTANCE_MAP:
+        return settings.OSM_SUBSTANCE_MAP[substance]
 
     power = tags.get("power", "").lower()
     if power in ("cable", "line"):
         return "electricity"
 
     utility = tags.get("utility", "").lower()
-    if utility in OSM_SUBSTANCE_MAP:
-        return OSM_SUBSTANCE_MAP[utility]
+    if utility in settings.OSM_SUBSTANCE_MAP:
+        return settings.OSM_SUBSTANCE_MAP[utility]
 
     waterway = tags.get("waterway", "").lower()
     if waterway in ("drain", "canal"):
@@ -319,7 +310,7 @@ def _parse_int(value: Optional[str]) -> int:
 
 def load_utilities_by_bbox(
     bbox: tuple,
-    target_crs: str = CRS_UTM37N,
+    target_crs: str = settings.CRS_UTM37N,
     use_cache: bool = True,
 ) -> gpd.GeoDataFrame:
     """
@@ -351,7 +342,7 @@ def load_utilities_by_bbox(
 
 def load_utilities_by_area(
     area_name: str,
-    target_crs: str = CRS_UTM37N,
+    target_crs: str = settings.CRS_UTM37N,
     use_cache: bool = True,
 ) -> gpd.GeoDataFrame:
     """
@@ -383,7 +374,7 @@ def load_utilities_by_area(
 def load_utilities_for_survey(
     survey_geom,
     buffer_m: float = 200.0,
-    target_crs: str = CRS_UTM37N,
+    target_crs: str = settings.CRS_UTM37N,
     use_cache: bool = True,
 ) -> gpd.GeoDataFrame:
     """
@@ -413,7 +404,7 @@ def load_utilities_for_survey(
     # Буфер в метрической CRS
     tmp["geometry"] = tmp.geometry.buffer(buffer_m)
     # Конвертируем в WGS84 для Overpass
-    tmp_wgs = tmp.to_crs(CRS_WGS84)
+    tmp_wgs = tmp.to_crs(settings.CRS_WGS84)
     bounds  = tmp_wgs.total_bounds  # (minx, miny, maxx, maxy) = (W, S, E, N)
 
     bbox = (bounds[1], bounds[0], bounds[3], bounds[2])  # S, W, N, E
@@ -458,7 +449,7 @@ def get_utilities_summary(gdf: gpd.GeoDataFrame) -> dict:
 
 def clear_cache() -> int:
     """Удаляет все файлы кеша OSM. Возвращает количество удалённых файлов."""
-    cache_dir = Path(OVERPASS_CACHE_DIR)
+    cache_dir = Path(settings.OVERPASS_CACHE_DIR)
     count = 0
     if cache_dir.exists():
         for f in cache_dir.glob("*.json"):
