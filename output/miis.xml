@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<MIIS version="1.0">
+  <Anomalies>
+    <Anomaly id="0" type="unknown" risk="LOW">
+      <Geometry>POINT (50 50)</Geometry>
+    </Anomaly>
+    <Anomaly id="1" type="unknown" risk="LOW">
+      <Geometry>POINT (20 30)</Geometry>
+    </Anomaly>
+    <Anomaly id="2" type="unknown" risk="LOW">
+      <Geometry>LINESTRING (10 10, 20 20)</Geometry>
+    </Anomaly>
+  </Anomalies>
+  <Utilities>
+    <Utility id="0" type="gas">
+      <Geometry>LINESTRING (48 48, 52 52)</Geometry>
+    </Utility>
+    <Utility id="1" type="water">
+      <Geometry>LINESTRING (15 25, 25 35)</Geometry>
+    </Utility>
+  </Utilities>
+</MIIS>

@@ -1,0 +1,32 @@
+# Геопространственные
+pyproj
+geopandas
+shapely
+rasterio
+fiona
+# База данных
+psycopg2-binary
+sqlalchemy
+geoalchemy2
+# Численные методы
+numpy
+scipy
+pywavelets
+opencv-python
+scikit-image
+scikit-learn
+catboost
+# Работа с SEG-Y
+segyio
+# Генерация документов
+jinja2
+python-docx
+ezdxf
+lxml
+matplotlib
+# AI-агент
+langchain
+langchain-anthropic
+pydantic
+# Тестирование
+pytest
