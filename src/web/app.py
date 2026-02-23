@@ -12,7 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from src.agent.chat_agent import ask_agent
 from src.pipeline.service import PROJECT_ROOT, run_pipeline
+from src.web.chat_manager import ChatManager
 from src.web.job_manager import JobManager
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ WEB_CACHE_DIR = (PROJECT_ROOT / ".cache" / "web").resolve()
 UPLOADS_DIR = WEB_CACHE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 job_manager = JobManager(history_path=WEB_CACHE_DIR / "run_history.json", max_workers=2)
+chat_manager = ChatManager(history_path=WEB_CACHE_DIR / "chat_history.json")
 
 app = FastAPI(
     title="Geophysical Utilities Pipeline",
@@ -51,6 +54,11 @@ class PipelineRunRequest(BaseModel):
     output_dir: str = Field(default=DEFAULT_OUTPUT_DIR)
     anomaly_threshold: float = Field(default=DEFAULT_THRESHOLD, ge=0)
     norms_profile: str = Field(default=DEFAULT_NORMS_PROFILE, pattern="^(demo|normative|strict)$")
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    session_id: str | None = None
 
 
 def _resolve_project_path(raw_path: str) -> Path:
@@ -100,6 +108,25 @@ def _prepare_summary(summary: dict[str, Any]) -> dict[str, Any]:
     enriched["xml_url"] = _artifact_url(summary["xml_path"])
     enriched["act_url"] = _artifact_url(summary["act_path"])
     return enriched
+
+
+def _latest_completed_run() -> dict[str, Any] | None:
+    for job in job_manager.list_jobs(limit=20):
+        if job.get("status") == "completed" and isinstance(job.get("result"), dict):
+            return job["result"]
+    return None
+
+
+def _render_chat_context(
+    session: dict[str, Any],
+    error: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "chat_session": session,
+        "chat_error": error,
+        "chat_sessions": chat_manager.list_sessions(limit=20),
+        "latest_run": _latest_completed_run(),
+    }
 
 
 def _save_upload(upload: UploadFile | None, run_dir: Path, prefix: str) -> str | None:
@@ -229,6 +256,54 @@ def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "web/index.html", context)
 
 
+@app.get("/chat", response_class=HTMLResponse)
+def chat_page(
+    request: Request,
+    session_id: str | None = Query(default=None),
+) -> HTMLResponse:
+    session = chat_manager.get_or_create_session(session_id)
+    context = _render_chat_context(session=session, error=None)
+    return templates.TemplateResponse(request, "web/chat.html", context)
+
+
+@app.post("/chat", response_class=HTMLResponse)
+def chat_from_form(
+    request: Request,
+    message: str = Form(...),
+    session_id: str | None = Form(default=None),
+) -> HTMLResponse:
+    session = chat_manager.get_or_create_session(session_id)
+    try:
+        user_message = message.strip()
+        if not user_message:
+            raise ValueError("Введите сообщение для агента.")
+
+        chat_manager.add_message(session["session_id"], "user", user_message)
+        updated_session = chat_manager.get_session(session["session_id"]) or session
+
+        reply = ask_agent(
+            message=user_message,
+            session_messages=updated_session.get("messages", []),
+            latest_run=_latest_completed_run(),
+        )
+        chat_manager.add_message(
+            session["session_id"],
+            "assistant",
+            reply["answer"],
+            metadata={"mode": reply.get("mode", "unknown")},
+        )
+        final_session = chat_manager.get_session(session["session_id"]) or session
+        context = _render_chat_context(session=final_session, error=None)
+        return templates.TemplateResponse(request, "web/chat.html", context)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Ошибка при работе chat UI")
+        current_session = chat_manager.get_session(session["session_id"]) or session
+        context = _render_chat_context(session=current_session, error=str(exc))
+        return templates.TemplateResponse(
+            request, "web/chat.html", context, status_code=400
+        )
+
+
 @app.post("/run", response_class=HTMLResponse)
 def run_from_form(
     request: Request,
@@ -332,6 +407,54 @@ def run_async_from_form(
 def run_api(payload: PipelineRunRequest) -> dict[str, Any]:
     summary = _execute(payload)
     return _prepare_summary(summary)
+
+
+@app.post("/api/chat")
+def chat_api(payload: ChatRequest) -> dict[str, Any]:
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message must not be empty")
+
+    session = chat_manager.get_or_create_session(payload.session_id)
+    session_id = session["session_id"]
+    chat_manager.add_message(session_id, "user", message)
+    current = chat_manager.get_session(session_id) or session
+
+    reply = ask_agent(
+        message=message,
+        session_messages=current.get("messages", []),
+        latest_run=_latest_completed_run(),
+    )
+    chat_manager.add_message(
+        session_id,
+        "assistant",
+        reply["answer"],
+        metadata={"mode": reply.get("mode", "unknown")},
+    )
+    updated = chat_manager.get_session(session_id) or current
+    messages = updated.get("messages", [])
+    assistant_message = messages[-1] if messages else {"content": reply["answer"]}
+
+    return {
+        "session_id": session_id,
+        "answer": assistant_message.get("content", reply["answer"]),
+        "mode": assistant_message.get("metadata", {}).get("mode", reply.get("mode")),
+        "messages_count": len(messages),
+    }
+
+
+@app.get("/api/chat/sessions")
+def list_chat_sessions(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+    sessions = chat_manager.list_sessions(limit=limit)
+    return {"items": sessions, "count": len(sessions)}
+
+
+@app.get("/api/chat/sessions/{session_id}")
+def get_chat_session(session_id: str) -> dict[str, Any]:
+    session = chat_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Chat session {session_id} not found")
+    return session
 
 
 @app.post("/api/run/async")

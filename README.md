@@ -84,6 +84,7 @@ python web_app.py
 
 После старта откройте:
 - `http://localhost:8000` — HTML-форма запуска пайплайна;
+- `http://localhost:8000/chat` — чат с агентом;
 - `http://localhost:8000/docs` — Swagger UI для API;
 - `http://localhost:8000/healthz` — health-check.
 
@@ -92,6 +93,11 @@ python web_app.py
 - асинхронный запуск с выдачей `job_id`;
 - загрузка входных файлов (`npy/tif/gpkg/xml/segy`) напрямую через браузер;
 - история последних запусков.
+
+В чате доступны:
+- web-страница диалога с сессиями;
+- API endpoint для сообщений (`POST /api/chat`);
+- API истории (`GET /api/chat/sessions`, `GET /api/chat/sessions/{session_id}`).
 
 #### API запуск (пример)
 
@@ -130,6 +136,16 @@ curl -X POST "http://localhost:8000/api/run/async" \
 ```bash
 curl "http://localhost:8000/api/run/<job_id>"
 curl "http://localhost:8000/api/runs?limit=20"
+```
+
+#### API чат (пример)
+
+```bash
+curl -X POST "http://localhost:8000/api/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Проанализируй риски для участка с котлованом 6.5 м"
+  }'
 ```
 
 ## Тесты
