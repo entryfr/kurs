@@ -6,8 +6,6 @@ import re
 import threading
 from typing import Any
 
-from src.agent.orchestrator import create_agent
-
 logger = logging.getLogger(__name__)
 
 _agent_lock = threading.Lock()
@@ -18,6 +16,8 @@ def _get_agent():
     global _cached_agent  # noqa: PLW0603
     with _agent_lock:
         if _cached_agent is None:
+            from src.agent.orchestrator import create_agent
+
             _cached_agent = create_agent()
         return _cached_agent
 
