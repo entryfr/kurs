@@ -14,6 +14,7 @@ def _fake_summary() -> dict:
         "anomalies_count": 3,
         "validation_issues": 0,
         "validation_issue_details": [],
+        "validation_issues_by_rule": {},
         "validation_report": "",
         "risk_details": [],
         "segy_features": {},

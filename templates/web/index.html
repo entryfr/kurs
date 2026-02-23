@@ -187,6 +187,29 @@
                 {% endif %}
             </li>
         </ul>
+
+        {% if summary.validation_issues_by_rule %}
+        <h2>Нарушения по нормативным правилам</h2>
+        <ul>
+            {% for rule_id, count in summary.validation_issues_by_rule.items() %}
+                <li><strong>{{ rule_id }}</strong>: {{ count }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if summary.risk_details %}
+        <h2>Обоснование риска по аномалиям</h2>
+        <ul>
+            {% for item in summary.risk_details %}
+                <li>
+                    <strong>#{{ item.anomaly_id }}</strong>:
+                    класс {{ item.risk_class }},
+                    confidence={{ item.confidence }},
+                    тип={{ item.utility_type }}
+                </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
     </div>
     {% endif %}
 </div>

@@ -13,6 +13,8 @@
 """
 
 import logging
+import re
+from dataclasses import dataclass
 import geopandas as gpd
 from shapely.geometry import Point
 
@@ -35,6 +37,271 @@ MIN_DISTANCE_RULES: list[tuple] = [
     ("water",        "sewage",       1.5,  "СП 42 п.12.35"),
     ("heating",      "sewage",       1.0,  "СП 42 п.12.35"),
 ]
+
+
+@dataclass
+class NormativeIssue:
+    rule_id: str
+    severity: str
+    reference: str
+    message: str
+
+    def to_text(self) -> str:
+        return f"[{self.rule_id} / {self.severity} / {self.reference}] {self.message}"
+
+
+NORMATIVE_RULES = {
+    "R01": "CRITICAL аномалия без коммуникаций в буфере",
+    "R02": "HIGH аномалия без подтверждения коммуникациями",
+    "R03": "Глубина залегания меньше глубины промерзания",
+    "R04": "Отсутствует колонка risk_class",
+    "R05": "Недопустимое значение risk_class",
+    "R06": "Отсутствует utility_type для значимых аномалий",
+    "R07": "Нет данных о глубине для HIGH/CRITICAL",
+    "R08": "Некорректная геометрия аномалии",
+    "R09": "Некорректная геометрия коммуникации",
+    "R10": "Коммуникация без заполненного типа",
+    "R11": "Критическая аномалия рядом с unknown-типом",
+    "R12": "Дублирование аномалий в пределах допуска",
+}
+
+
+def _issue(rule_id: str, severity: str, reference: str, message: str) -> NormativeIssue:
+    return NormativeIssue(
+        rule_id=rule_id,
+        severity=severity,
+        reference=reference,
+        message=message,
+    )
+
+
+def _is_bad_geometry(geom) -> bool:
+    if geom is None:
+        return True
+    if geom.is_empty:
+        return True
+    return not geom.is_valid
+
+
+def validate_anomalies_detailed(
+    anomalies_gdf: gpd.GeoDataFrame,
+    utilities_gdf: gpd.GeoDataFrame,
+    buffer_dist: float = BUFFER_DISTANCE,
+    duplicate_tolerance: float = 0.2,
+) -> list[NormativeIssue]:
+    issues: list[NormativeIssue] = []
+
+    if anomalies_gdf.empty:
+        logger.info("Validator: нет аномалий для проверки")
+        return issues
+
+    if not utilities_gdf.empty and anomalies_gdf.crs != utilities_gdf.crs:
+        logger.warning("Validator: CRS аномалий и коммуникаций не совпадают, выполняем перепроецирование")
+        utilities_gdf = utilities_gdf.to_crs(anomalies_gdf.crs)
+
+    # R08: проверка геометрий аномалий
+    for idx, row in anomalies_gdf.iterrows():
+        if _is_bad_geometry(row.geometry):
+            issues.append(
+                _issue(
+                    "R08",
+                    "ERROR",
+                    "СП 47 п.8.3",
+                    f"Аномалия #{idx}: некорректная или пустая геометрия.",
+                )
+            )
+
+    # R09/R10: проверка геометрии и типа коммуникаций
+    if not utilities_gdf.empty:
+        for idx, row in utilities_gdf.iterrows():
+            if _is_bad_geometry(row.geometry):
+                issues.append(
+                    _issue(
+                        "R09",
+                        "ERROR",
+                        "СП 47 п.8.3",
+                        f"Коммуникация #{idx}: некорректная или пустая геометрия.",
+                    )
+                )
+            if "type" not in utilities_gdf.columns or row.get("type") in (None, "", "unknown"):
+                issues.append(
+                    _issue(
+                        "R10",
+                        "WARNING",
+                        "СП 47 п.8.3",
+                        f"Коммуникация #{idx}: не заполнен тип коммуникации.",
+                    )
+                )
+
+    # R04/R05: качество risk_class
+    if "risk_class" not in anomalies_gdf.columns:
+        issues.append(
+            _issue(
+                "R04",
+                "ERROR",
+                "СП 47 п.8.3",
+                "В наборе аномалий отсутствует колонка risk_class.",
+            )
+        )
+        risk_series = gpd.pd.Series(["LOW"] * len(anomalies_gdf), index=anomalies_gdf.index)
+    else:
+        risk_series = anomalies_gdf["risk_class"].fillna("LOW")
+        allowed = {"LOW", "HIGH", "CRITICAL"}
+        invalid = anomalies_gdf[~risk_series.isin(allowed)]
+        for idx, row in invalid.iterrows():
+            issues.append(
+                _issue(
+                    "R05",
+                    "ERROR",
+                    "СП 47 п.8.3",
+                    f"Аномалия #{idx}: недопустимый класс риска '{row.get('risk_class')}'.",
+                )
+            )
+
+    # R06: utility_type для HIGH/CRITICAL
+    significant_mask = risk_series.isin(["HIGH", "CRITICAL"])
+    if "utility_type" not in anomalies_gdf.columns:
+        if significant_mask.any():
+            issues.append(
+                _issue(
+                    "R06",
+                    "WARNING",
+                    "СП 47 п.8.3",
+                    "Для HIGH/CRITICAL аномалий отсутствует колонка utility_type.",
+                )
+            )
+    else:
+        missing_type = anomalies_gdf[significant_mask & anomalies_gdf["utility_type"].isna()]
+        for idx, _ in missing_type.iterrows():
+            issues.append(
+                _issue(
+                    "R06",
+                    "WARNING",
+                    "СП 47 п.8.3",
+                    f"Аномалия #{idx}: не определён тип коммуникации.",
+                )
+            )
+
+    # R07/R03: контроль глубины
+    if "depth" not in anomalies_gdf.columns:
+        if significant_mask.any():
+            issues.append(
+                _issue(
+                    "R07",
+                    "WARNING",
+                    "СП 47 п.8.3",
+                    "Для HIGH/CRITICAL аномалий отсутствует колонка depth.",
+                )
+            )
+    else:
+        missing_depth = anomalies_gdf[significant_mask & anomalies_gdf["depth"].isna()]
+        for idx, _ in missing_depth.iterrows():
+            issues.append(
+                _issue(
+                    "R07",
+                    "WARNING",
+                    "СП 47 п.8.3",
+                    f"Аномалия #{idx}: не указана глубина залегания.",
+                )
+            )
+
+        shallow = anomalies_gdf[
+            anomalies_gdf["depth"].notna()
+            & (anomalies_gdf["depth"] < FROST_DEPTH_MOSCOW)
+        ]
+        for idx, anom in shallow.iterrows():
+            issues.append(
+                _issue(
+                    "R03",
+                    "WARNING",
+                    "СП 22",
+                    f"Аномалия #{idx}: глубина залегания {anom['depth']:.2f} м "
+                    f"< глубины промерзания {FROST_DEPTH_MOSCOW} м (Москва).",
+                )
+            )
+
+    # R01/R02/R11: проверки по близости коммуникаций
+    critical = anomalies_gdf[risk_series == "CRITICAL"]
+    high = anomalies_gdf[risk_series == "HIGH"]
+
+    def _nearby_utilities(geom):
+        if utilities_gdf.empty:
+            return gpd.GeoDataFrame()
+        return utilities_gdf[utilities_gdf.intersects(geom.buffer(buffer_dist))]
+
+    for idx, anom in critical.iterrows():
+        nearby = _nearby_utilities(anom.geometry)
+        if len(nearby) == 0:
+            issues.append(
+                _issue(
+                    "R01",
+                    "ERROR",
+                    "СП 47 п.8.3",
+                    f"Аномалия #{idx}: в радиусе {buffer_dist} м нет учтённых коммуникаций — "
+                    "возможен неучтённый подземный объект. Требуется дополнительное обследование.",
+                )
+            )
+            continue
+
+        if "type" in nearby.columns:
+            unknown_nearby = nearby[nearby["type"].isin(["unknown", "unknown_pipeline"])]
+            if not unknown_nearby.empty:
+                issues.append(
+                    _issue(
+                        "R11",
+                        "WARNING",
+                        "СП 47 п.8.3",
+                        f"Аномалия #{idx}: рядом есть коммуникации с неопределённым типом.",
+                    )
+                )
+
+    if "has_utility" in anomalies_gdf.columns:
+        high_unconfirmed = anomalies_gdf[
+            (risk_series == "HIGH") & (anomalies_gdf["has_utility"] == False)  # noqa
+        ]
+        for idx, _ in high_unconfirmed.iterrows():
+            issues.append(
+                _issue(
+                    "R02",
+                    "WARNING",
+                    "СП 47 п.8.3",
+                    f"Аномалия #{idx} (HIGH): высокий риск, но коммуникации в буфере не найдены.",
+                )
+            )
+    else:
+        for idx, anom in high.iterrows():
+            if _nearby_utilities(anom.geometry).empty:
+                issues.append(
+                    _issue(
+                        "R02",
+                        "WARNING",
+                        "СП 47 п.8.3",
+                        f"Аномалия #{idx} (HIGH): высокий риск, но коммуникации в буфере не найдены.",
+                    )
+                )
+
+    # R12: дубли аномалий
+    geometries = list(anomalies_gdf.geometry.items())
+    for i in range(len(geometries)):
+        idx_a, geom_a = geometries[i]
+        if _is_bad_geometry(geom_a):
+            continue
+        for j in range(i + 1, len(geometries)):
+            idx_b, geom_b = geometries[j]
+            if _is_bad_geometry(geom_b):
+                continue
+            if geom_a.distance(geom_b) < duplicate_tolerance:
+                issues.append(
+                    _issue(
+                        "R12",
+                        "WARNING",
+                        "СП 47 п.8.3",
+                        f"Аномалии #{idx_a} и #{idx_b} дублируются (расстояние < {duplicate_tolerance} м).",
+                    )
+                )
+
+    logger.info(f"Validator: выявлено {len(issues)} нарушений")
+    return issues
 
 
 def validate_anomalies(
@@ -62,68 +329,12 @@ def validate_anomalies(
     Returns:
         Список строк с описанием ошибок/предупреждений.
     """
-    errors: list[str] = []
-
-    if anomalies_gdf.empty:
-        logger.info("Validator: нет аномалий для проверки")
-        return errors
-
-    # Убеждаемся, что CRS совпадают
-    if not utilities_gdf.empty and anomalies_gdf.crs != utilities_gdf.crs:
-        logger.warning("Validator: CRS аномалий и коммуникаций не совпадают, выполняем перепроецирование")
-        utilities_gdf = utilities_gdf.to_crs(anomalies_gdf.crs)
-
-    # ── Правило 1: Критическая аномалия должна иметь учтённую коммуникацию ──
-    critical = anomalies_gdf[anomalies_gdf.get("risk_class", gpd.pd.Series()) == "CRITICAL"]
-    for idx, anom in critical.iterrows():
-        buffer = anom.geometry.buffer(buffer_dist)
-        if utilities_gdf.empty:
-            nearby = gpd.GeoDataFrame()
-        else:
-            nearby = utilities_gdf[utilities_gdf.intersects(buffer)]
-
-        if len(nearby) == 0:
-            errors.append(
-                f"[CRITICAL / СП47 п.8.3] Аномалия #{idx}: "
-                f"в радиусе {buffer_dist} м нет учтённых коммуникаций — "
-                "возможен неучтённый подземный объект. Требуется дополнительное обследование."
-            )
-        else:
-            # Источник данных (OSM или собственная БД)
-            source = "OSM" if "osm_id" in nearby.columns else "БД проекта"
-            types  = ", ".join(nearby["type"].unique()) if "type" in nearby.columns else "неизвестен"
-            logger.info(
-                f"Аномалия #{idx} (CRITICAL): подтверждена коммуникациями из {source} "
-                f"(типы: {types})"
-            )
-
-    # ── Правило 2: Глубина залегания vs глубина промерзания ─────────────────
-    if "depth" in anomalies_gdf.columns:
-        shallow = anomalies_gdf[
-            anomalies_gdf["depth"].notna() &
-            (anomalies_gdf["depth"] < FROST_DEPTH_MOSCOW)
-        ]
-        for idx, anom in shallow.iterrows():
-            errors.append(
-                f"[WARNING / СП 22] Аномалия #{idx}: "
-                f"глубина залегания {anom['depth']:.2f} м < глубины промерзания "
-                f"{FROST_DEPTH_MOSCOW} м (Москва). Риск повреждения при сезонном пучении."
-            )
-
-    # ── Правило 3: Неподтверждённые аномалии с высоким риском ──────────────
-    if "has_utility" in anomalies_gdf.columns:
-        high_unconfirmed = anomalies_gdf[
-            (anomalies_gdf.get("risk_class", "") == "HIGH") &
-            (anomalies_gdf["has_utility"] == False)  # noqa
-        ]
-        for idx, _ in high_unconfirmed.iterrows():
-            errors.append(
-                f"[HIGH / СП47 п.8.3] Аномалия #{idx}: "
-                "высокий риск, но коммуникации в буфере не найдены ни в OSM, ни в БД проекта."
-            )
-
-    logger.info(f"Validator: выявлено {len(errors)} нарушений")
-    return errors
+    issues = validate_anomalies_detailed(
+        anomalies_gdf=anomalies_gdf,
+        utilities_gdf=utilities_gdf,
+        buffer_dist=buffer_dist,
+    )
+    return [issue.to_text() for issue in issues]
 
 
 def check_compliance(
@@ -193,9 +404,18 @@ def generate_validation_report(
     """
     lines = ["=" * 60, "ОТЧЁТ О НОРМАТИВНОЙ ВАЛИДАЦИИ", "=" * 60]
 
-    if not validation_errors and not compliance_issues:
+    all_issues = validation_errors + compliance_issues
+    issues_by_rule = summarize_issues_by_rule(all_issues)
+
+    if not all_issues:
         lines.append("✅ Нарушений не выявлено.")
         return "\n".join(lines)
+
+    if issues_by_rule:
+        lines.append("\nСводка по правилам:")
+        for rule_id, count in sorted(issues_by_rule.items()):
+            title = NORMATIVE_RULES.get(rule_id, "Прочее")
+            lines.append(f"  • {rule_id}: {count} — {title}")
 
     if validation_errors:
         lines.append(f"\n⚠️  Аномалии без подтверждения ({len(validation_errors)}):")
@@ -209,3 +429,13 @@ def generate_validation_report(
 
     lines.append("\n" + "=" * 60)
     return "\n".join(lines)
+
+
+def summarize_issues_by_rule(issues: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        match = re.search(r"\[(R\d{2})", issue)
+        if match:
+            rule_id = match.group(1)
+            counts[rule_id] = counts.get(rule_id, 0) + 1
+    return counts

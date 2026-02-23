@@ -12,6 +12,7 @@ from config import settings
 from src.agent.validator import (
     check_compliance,
     generate_validation_report,
+    summarize_issues_by_rule,
     validate_anomalies,
 )
 from src.classification.risk_classifier import RiskClassifier
@@ -115,7 +116,28 @@ def _risk_confidence(risk_class: str, row: gpd.GeoSeries) -> float:
     return float(np.clip(base + intensity_boost, 0.05, 0.99))
 
 
-def _build_risk_explanations(result_gdf: gpd.GeoDataFrame) -> list[dict[str, Any]]:
+def _build_anomaly_issue_map(issues: list[str]) -> dict[int, list[str]]:
+    issue_map: dict[int, list[str]] = {}
+    for issue in issues:
+        if "Аномалия #" not in issue:
+            continue
+        match = None
+        try:
+            import re
+
+            match = re.search(r"Аномалия #(\d+)", issue)
+        except re.error:
+            match = None
+        if match is None:
+            continue
+        idx = int(match.group(1))
+        issue_map.setdefault(idx, []).append(issue)
+    return issue_map
+
+
+def _build_risk_explanations(
+    result_gdf: gpd.GeoDataFrame, issue_map: dict[int, list[str]] | None = None
+) -> list[dict[str, Any]]:
     explanations: list[dict[str, Any]] = []
     for idx, row in result_gdf.iterrows():
         risk_class = row.get("risk_class", "LOW")
@@ -138,6 +160,7 @@ def _build_risk_explanations(result_gdf: gpd.GeoDataFrame) -> list[dict[str, Any
                 "utility_type": utility_type,
                 "confidence": _risk_confidence(risk_class, row),
                 "reasons": reasons,
+                "norm_violations": issue_map.get(int(idx), []) if issue_map else [],
             }
         )
     return explanations
@@ -205,6 +228,7 @@ def run_pipeline(
     compliance_issues = check_compliance(result_gdf, utilities_gdf)
     all_issues = validation_errors + compliance_issues
     validation_report = generate_validation_report(validation_errors, compliance_issues)
+    issues_by_rule = summarize_issues_by_rule(all_issues)
 
     if all_issues:
         for issue in all_issues:
@@ -228,7 +252,8 @@ def run_pipeline(
         output_path=str(act_path),
     )
 
-    risk_details = _build_risk_explanations(result_gdf)
+    issue_map = _build_anomaly_issue_map(all_issues)
+    risk_details = _build_risk_explanations(result_gdf, issue_map)
 
     return {
         "input_mode": input_mode,
@@ -237,6 +262,7 @@ def run_pipeline(
         "anomalies_count": len(result_gdf),
         "validation_issues": len(all_issues),
         "validation_issue_details": all_issues,
+        "validation_issues_by_rule": issues_by_rule,
         "validation_report": validation_report,
         "risk_details": risk_details,
         "segy_features": segy_features,
