@@ -104,21 +104,31 @@
             <div class="error">{{ error }}</div>
         {% endif %}
 
-        <form action="/run" method="post">
+        <form action="/run" method="post" enctype="multipart/form-data">
             <label for="magnetic_grid">Путь к магнитной сетке (.npy)</label>
-            <input id="magnetic_grid" name="magnetic_grid" type="text" value="{{ form_values.magnetic_grid }}" required>
+            <input id="magnetic_grid" name="magnetic_grid" type="text" value="{{ form_values.magnetic_grid }}">
+            <label for="magnetic_grid_file">или загрузка магнитной сетки</label>
+            <input id="magnetic_grid_file" name="magnetic_grid_file" type="file" accept=".npy,.tif,.tiff">
 
             <label for="anomalies">Путь к аномалиям (.gpkg)</label>
             <input id="anomalies" name="anomalies" type="text" value="{{ form_values.anomalies }}">
+            <label for="anomalies_file">или загрузка аномалий</label>
+            <input id="anomalies_file" name="anomalies_file" type="file" accept=".gpkg">
 
             <label for="utilities">Путь к коммуникациям (.gpkg)</label>
             <input id="utilities" name="utilities" type="text" value="{{ form_values.utilities }}">
+            <label for="utilities_file">или загрузка коммуникаций</label>
+            <input id="utilities_file" name="utilities_file" type="file" accept=".gpkg">
 
             <label for="miis_xml">Путь к MIIS XML (опционально, переопределяет слои)</label>
             <input id="miis_xml" name="miis_xml" type="text" value="{{ form_values.miis_xml }}">
+            <label for="miis_xml_file">или загрузка MIIS XML</label>
+            <input id="miis_xml_file" name="miis_xml_file" type="file" accept=".xml">
 
             <label for="segy_file">Путь к SEG-Y (опционально)</label>
             <input id="segy_file" name="segy_file" type="text" value="{{ form_values.segy_file }}">
+            <label for="segy_upload_file">или загрузка SEG-Y</label>
+            <input id="segy_upload_file" name="segy_upload_file" type="file" accept=".segy,.sgy">
 
             <label for="output_dir">Каталог вывода</label>
             <input id="output_dir" name="output_dir" type="text" value="{{ form_values.output_dir }}" required>
@@ -133,9 +143,23 @@
                 <option value="strict" {% if form_values.norms_profile == 'strict' %}selected{% endif %}>strict</option>
             </select>
 
-            <button type="submit">Запустить пайплайн</button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="submit">Запустить синхронно</button>
+                <button type="submit" formaction="/run/async">Запустить асинхронно</button>
+            </div>
         </form>
     </div>
+
+    {% if async_job %}
+    <div class="card">
+        <div class="ok">
+            Асинхронная задача создана:
+            <strong>{{ async_job.job_id }}</strong>
+            (статус: {{ async_job.status }}).
+            Проверка: <a href="{{ async_job.status_url }}" target="_blank">{{ async_job.status_url }}</a>
+        </div>
+    </div>
+    {% endif %}
 
     {% if summary %}
     <div class="card">
@@ -214,6 +238,20 @@
             {% endfor %}
         </ul>
         {% endif %}
+    </div>
+    {% endif %}
+
+    {% if jobs %}
+    <div class="card">
+        <h2>История запусков</h2>
+        <ul>
+            {% for job in jobs %}
+                <li>
+                    <strong>{{ job.job_id }}</strong> — {{ job.status }}
+                    ({{ job.created_at }})
+                </li>
+            {% endfor %}
+        </ul>
     </div>
     {% endif %}
 </div>

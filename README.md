@@ -87,6 +87,12 @@ python web_app.py
 - `http://localhost:8000/docs` — Swagger UI для API;
 - `http://localhost:8000/healthz` — health-check.
 
+В web-форме доступны:
+- синхронный запуск;
+- асинхронный запуск с выдачей `job_id`;
+- загрузка входных файлов (`npy/tif/gpkg/xml/segy`) напрямую через браузер;
+- история последних запусков.
+
 #### API запуск (пример)
 
 ```bash
@@ -104,6 +110,28 @@ curl -X POST "http://localhost:8000/api/run" \
   }'
 ```
 
+#### Асинхронный API запуск и статус
+
+```bash
+curl -X POST "http://localhost:8000/api/run/async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "magnetic_grid": "data/raw/magnetic_grid.npy",
+    "anomalies": "data/processed/anomalies.gpkg",
+    "utilities": "data/processed/utilities.gpkg",
+    "output_dir": "output",
+    "anomaly_threshold": 30.0,
+    "norms_profile": "normative"
+  }'
+```
+
+Ответ содержит `job_id` и `status_url`, далее:
+
+```bash
+curl "http://localhost:8000/api/run/<job_id>"
+curl "http://localhost:8000/api/runs?limit=20"
+```
+
 ## Тесты
 
 ```bash
@@ -112,6 +140,7 @@ pytest test_osm_loader.py -v
 pytest tests/test_utility_type_identifier.py -v
 pytest tests/test_web_app.py -v
 pytest tests/test_input_loader.py -v
+pytest tests/test_validator_rules.py -v
 ```
 
 ## Текущий статус
