@@ -127,7 +127,11 @@
             <input id="anomaly_threshold" name="anomaly_threshold" type="number" step="0.1" min="0" value="{{ form_values.anomaly_threshold }}" required>
 
             <label for="norms_profile">Профиль нормативов</label>
-            <input id="norms_profile" name="norms_profile" type="text" value="{{ form_values.norms_profile }}" required>
+            <select id="norms_profile" name="norms_profile" style="width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 12px;">
+                <option value="demo" {% if form_values.norms_profile == 'demo' %}selected{% endif %}>demo</option>
+                <option value="normative" {% if form_values.norms_profile == 'normative' %}selected{% endif %}>normative</option>
+                <option value="strict" {% if form_values.norms_profile == 'strict' %}selected{% endif %}>strict</option>
+            </select>
 
             <button type="submit">Запустить пайплайн</button>
         </form>
