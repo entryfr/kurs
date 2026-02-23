@@ -8,9 +8,15 @@ client = TestClient(app)
 
 def _fake_summary() -> dict:
     return {
+        "input_mode": "vector_layers",
+        "norms_profile": "normative",
         "detected_count": 2,
         "anomalies_count": 3,
         "validation_issues": 0,
+        "validation_issue_details": [],
+        "validation_report": "",
+        "risk_details": [],
+        "segy_features": {},
         "dxf_path": "output/scheme.dxf",
         "xml_path": "output/miis.xml",
         "act_path": "output/act.docx",

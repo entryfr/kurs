@@ -10,11 +10,30 @@ CRS_LOCAL   = "EPSG:28406"  # СК-42 / Гаусс-Крюгер зона 6 (МС
 CRS_WGS84   = "EPSG:4326"   # WGS-84 — стандарт OSM/Overpass
 CRS_UTM37N  = "EPSG:32637"  # UTM зона 37N — метрическая CRS для Москвы (для расчётов)
 
-# ── Допуски при геодезической привязке ───────────────────────────────────────
-RMS_TOLERANCE = 0.05          # СКО аффинного преобразования, метры (СП 47.13330)
+# ── Профили нормативных допусков ─────────────────────────────────────────────
+NORMATIVE_PROFILES = {
+    "demo": {
+        "rms_tolerance": 0.18,
+        "buffer_distance": 3.0,
+        "description": "Демонстрационный профиль для пилотных запусков.",
+    },
+    "normative": {
+        "rms_tolerance": 0.18,
+        "buffer_distance": 2.5,
+        "description": "Профиль, ориентированный на требования СП 47.",
+    },
+    "strict": {
+        "rms_tolerance": 0.05,
+        "buffer_distance": 2.0,
+        "description": "Строгий внутренний контроль качества.",
+    },
+}
 
-# ── Буферные зоны ────────────────────────────────────────────────────────────
-BUFFER_DISTANCE = 3.0         # Радиус буфера вокруг аномалии, метры
+DEFAULT_NORMS_PROFILE = "normative"
+
+# Значения по умолчанию для обратной совместимости модулей
+RMS_TOLERANCE = NORMATIVE_PROFILES[DEFAULT_NORMS_PROFILE]["rms_tolerance"]
+BUFFER_DISTANCE = NORMATIVE_PROFILES[DEFAULT_NORMS_PROFILE]["buffer_distance"]
 
 # ── Весовые коэффициенты последствий (для формулы риска R = P * C * (1-D)) ──
 # Чем выше — тем серьёзнее последствия повреждения коммуникации

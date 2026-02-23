@@ -20,11 +20,52 @@ def read_segy(file_path):
 
 def extract_hyperbola_parameters(radargram, threshold=0.5):
     """
-    Заглушка для выделения параметров гипербол от подземных объектов.
-    В реальности здесь нужно применить алгоритмы поиска гипербол.
+    Выделяет простые параметры гиперболы из радарграммы в детерминированном виде.
     """
-    # Пока просто возвращаем случайные значения для демонстрации
+    if radargram.size == 0:
+        return {
+            'width': 0.0,
+            'apex_depth': 0.0,
+            'confidence': 0.0,
+        }
+
+    amplitude = np.abs(radargram)
+    max_trace_idx, apex_sample_idx = np.unravel_index(np.argmax(amplitude), amplitude.shape)
+    apex_profile = amplitude[:, apex_sample_idx]
+    if apex_profile.max() <= 0:
+        active_width = 0.0
+    else:
+        active_mask = apex_profile >= (apex_profile.max() * threshold)
+        active_width = float(np.count_nonzero(active_mask))
+
+    confidence = float(apex_profile.max() / (np.mean(amplitude) + 1e-6))
+
     return {
-        'width': np.random.uniform(0.5, 3.0),
-        'apex_depth': np.random.uniform(1.0, 10.0)
+        'width': active_width,
+        'apex_depth': float(apex_sample_idx),
+        'confidence': confidence,
+        'apex_trace': float(max_trace_idx),
+    }
+
+
+def extract_segy_features(file_path):
+    """
+    Извлекает признаки из SEG-Y для интеграции в классификацию.
+    """
+    data, sample_rate, depths = read_segy(file_path)
+    params = extract_hyperbola_parameters(data)
+
+    trace_energy = np.mean(np.abs(data), axis=1)
+    if np.allclose(trace_energy, 0):
+        seg_velocity = 0.0
+    else:
+        seg_velocity = float(np.std(trace_energy) / (np.mean(trace_energy) + 1e-6))
+
+    apex_depth_m = float(params['apex_depth'] * sample_rate)
+
+    return {
+        'radar_hyperbola_w': float(params['width']),
+        'seg_velocity': seg_velocity,
+        'segy_confidence': min(params['confidence'] / 10.0, 1.0),
+        'apex_depth_m': apex_depth_m,
     }

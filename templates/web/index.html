@@ -109,16 +109,25 @@
             <input id="magnetic_grid" name="magnetic_grid" type="text" value="{{ form_values.magnetic_grid }}" required>
 
             <label for="anomalies">Путь к аномалиям (.gpkg)</label>
-            <input id="anomalies" name="anomalies" type="text" value="{{ form_values.anomalies }}" required>
+            <input id="anomalies" name="anomalies" type="text" value="{{ form_values.anomalies }}">
 
             <label for="utilities">Путь к коммуникациям (.gpkg)</label>
-            <input id="utilities" name="utilities" type="text" value="{{ form_values.utilities }}" required>
+            <input id="utilities" name="utilities" type="text" value="{{ form_values.utilities }}">
+
+            <label for="miis_xml">Путь к MIIS XML (опционально, переопределяет слои)</label>
+            <input id="miis_xml" name="miis_xml" type="text" value="{{ form_values.miis_xml }}">
+
+            <label for="segy_file">Путь к SEG-Y (опционально)</label>
+            <input id="segy_file" name="segy_file" type="text" value="{{ form_values.segy_file }}">
 
             <label for="output_dir">Каталог вывода</label>
             <input id="output_dir" name="output_dir" type="text" value="{{ form_values.output_dir }}" required>
 
             <label for="anomaly_threshold">Порог детекции (нТл)</label>
             <input id="anomaly_threshold" name="anomaly_threshold" type="number" step="0.1" min="0" value="{{ form_values.anomaly_threshold }}" required>
+
+            <label for="norms_profile">Профиль нормативов</label>
+            <input id="norms_profile" name="norms_profile" type="text" value="{{ form_values.norms_profile }}" required>
 
             <button type="submit">Запустить пайплайн</button>
         </form>
@@ -140,6 +149,14 @@
             <div class="metric">
                 <strong>Проблем валидации:</strong><br>
                 {{ summary.validation_issues }}
+            </div>
+            <div class="metric">
+                <strong>Режим входа:</strong><br>
+                {{ summary.input_mode }}
+            </div>
+            <div class="metric">
+                <strong>Профиль норм:</strong><br>
+                {{ summary.norms_profile }}
             </div>
         </div>
 

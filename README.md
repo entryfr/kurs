@@ -6,9 +6,9 @@
 ## Что делает проект
 
 1. Загружает входные данные:
-   - магнитную сетку (`.npy`);
-   - обнаруженные аномалии (`.gpkg`);
-   - учтённые коммуникации (`.gpkg`).
+   - магнитную сетку (`.npy` или `GeoTIFF`);
+   - обнаруженные аномалии и коммуникации (`.gpkg`) либо из `MIIS XML`;
+   - опциональные признаки из `SEG-Y`.
 2. Выполняет детекцию линейных аномалий на магнитной карте.
 3. Определяет вероятный тип коммуникации для каждой аномалии.
 4. Классифицирует уровень риска (`LOW` / `HIGH` / `CRITICAL`).
@@ -54,7 +54,20 @@ python main.py \
   --anomalies data/processed/anomalies.gpkg \
   --utilities data/processed/utilities.gpkg \
   --output-dir output \
-  --anomaly-threshold 30.0
+  --anomaly-threshold 30.0 \
+  --norms-profile normative
+```
+
+#### Запуск из MIIS XML + GeoTIFF + SEG-Y
+
+```bash
+python main.py \
+  --magnetic-grid data/raw/magnetic_grid.tif \
+  --miis-xml data/raw/input.miis.xml \
+  --segy data/raw/profile.segy \
+  --output-dir output \
+  --anomaly-threshold 30.0 \
+  --norms-profile normative
 ```
 
 ### Запуск через веб-интерфейс
@@ -83,8 +96,11 @@ curl -X POST "http://localhost:8000/api/run" \
     "magnetic_grid": "data/raw/magnetic_grid.npy",
     "anomalies": "data/processed/anomalies.gpkg",
     "utilities": "data/processed/utilities.gpkg",
+    "miis_xml": "",
+    "segy_file": "",
     "output_dir": "output",
-    "anomaly_threshold": 30.0
+    "anomaly_threshold": 30.0,
+    "norms_profile": "normative"
   }'
 ```
 
@@ -95,6 +111,7 @@ pytest tests/test_coordinate_transformer.py -v
 pytest test_osm_loader.py -v
 pytest tests/test_utility_type_identifier.py -v
 pytest tests/test_web_app.py -v
+pytest tests/test_input_loader.py -v
 ```
 
 ## Текущий статус

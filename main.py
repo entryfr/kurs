@@ -36,6 +36,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=30.0,
         help="Порог детекции аномалий в нТл.",
     )
+    parser.add_argument(
+        "--miis-xml",
+        default=None,
+        help="Опциональный путь к MIIS XML. Если указан, аномалии/коммуникации берутся из XML.",
+    )
+    parser.add_argument(
+        "--segy",
+        default=None,
+        help="Опциональный путь к SEG-Y для извлечения дополнительных признаков.",
+    )
+    parser.add_argument(
+        "--norms-profile",
+        default="normative",
+        choices=["demo", "normative", "strict"],
+        help="Профиль нормативных допусков.",
+    )
     return parser
 
 
@@ -51,6 +67,9 @@ def main() -> None:
         utilities_path=Path(args.utilities),
         output_dir=Path(args.output_dir),
         anomaly_threshold=args.anomaly_threshold,
+        miis_xml_path=Path(args.miis_xml) if args.miis_xml else None,
+        segy_path=Path(args.segy) if args.segy else None,
+        norms_profile=args.norms_profile,
     )
 
     logger.info("Пайплайн завершён: %s", summary)
@@ -58,6 +77,8 @@ def main() -> None:
     print(f"  - {summary['dxf_path']}")
     print(f"  - {summary['xml_path']}")
     print(f"  - {summary['act_path']}")
+    print(f"  - Режим входа: {summary['input_mode']}")
+    print(f"  - Профиль норм: {summary['norms_profile']}")
 
 
 if __name__ == "__main__":
