@@ -116,13 +116,8 @@ def healthz() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
-    context = {
-        "request": request,
-        "form_values": _default_form_values(),
-        "summary": None,
-        "error": None,
-    }
-    return templates.TemplateResponse("web/index.html", context)
+    context = {"form_values": _default_form_values(), "summary": None, "error": None}
+    return templates.TemplateResponse(request, "web/index.html", context)
 
 
 @app.post("/run", response_class=HTMLResponse)
@@ -143,7 +138,6 @@ def run_from_form(
     }
 
     context = {
-        "request": request,
         "form_values": form_values,
         "summary": None,
         "error": None,
@@ -153,11 +147,13 @@ def run_from_form(
         run_request = PipelineRunRequest(**form_values)
         summary = _execute(run_request)
         context["summary"] = _prepare_summary(summary)
-        return templates.TemplateResponse("web/index.html", context)
+        return templates.TemplateResponse(request, "web/index.html", context)
     except Exception as exc:
         logger.exception("Ошибка при запуске пайплайна через веб-интерфейс")
         context["error"] = str(exc)
-        return templates.TemplateResponse("web/index.html", context, status_code=400)
+        return templates.TemplateResponse(
+            request, "web/index.html", context, status_code=400
+        )
 
 
 @app.post("/api/run")
