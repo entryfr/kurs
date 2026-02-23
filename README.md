@@ -21,11 +21,14 @@
 ## Структура проекта
 
 - `main.py` — CLI запуск демо-пайплайна.
+- `src/pipeline` — сервисный слой запуска (`run_pipeline`), общий для CLI и web.
+- `src/web` — FastAPI веб-интерфейс.
 - `src/preprocessing` — предобработка данных, трансформации координат, OSM loader.
 - `src/detection` — детекция аномалий, буферный анализ, слепые зоны.
 - `src/classification` — классификация риска/типа коммуникаций, оценка коррозии.
 - `src/agent` — оркестратор и нормативная валидация.
 - `src/reporting` — экспорт DXF/XML/DOCX.
+- `templates/web` — HTML-шаблон веб-интерфейса.
 - `data/` — входные демо-данные.
 - `output/` — результирующие файлы.
 
@@ -54,11 +57,44 @@ python main.py \
   --anomaly-threshold 30.0
 ```
 
+### Запуск через веб-интерфейс
+
+```bash
+uvicorn src.web.app:app --host 0.0.0.0 --port 8000
+```
+
+или
+
+```bash
+python web_app.py
+```
+
+После старта откройте:
+- `http://localhost:8000` — HTML-форма запуска пайплайна;
+- `http://localhost:8000/docs` — Swagger UI для API;
+- `http://localhost:8000/healthz` — health-check.
+
+#### API запуск (пример)
+
+```bash
+curl -X POST "http://localhost:8000/api/run" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "magnetic_grid": "data/raw/magnetic_grid.npy",
+    "anomalies": "data/processed/anomalies.gpkg",
+    "utilities": "data/processed/utilities.gpkg",
+    "output_dir": "output",
+    "anomaly_threshold": 30.0
+  }'
+```
+
 ## Тесты
 
 ```bash
 pytest tests/test_coordinate_transformer.py -v
 pytest test_osm_loader.py -v
+pytest tests/test_utility_type_identifier.py -v
+pytest tests/test_web_app.py -v
 ```
 
 ## Текущий статус

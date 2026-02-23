@@ -31,5 +31,10 @@ langchain-community
 langchain-anthropic
 pydantic
 requests
+# Веб-интерфейс
+fastapi
+uvicorn
+python-multipart
+httpx
 # Тестирование
 pytest

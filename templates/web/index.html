@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Геофизический пайплайн</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background: #f7f8fb;
+            color: #1f2937;
+        }
+        .container {
+            max-width: 980px;
+            margin: 32px auto;
+            padding: 0 16px;
+        }
+        .card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        h1, h2 {
+            margin-top: 0;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 16px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        .error {
+            border: 1px solid #fca5a5;
+            background: #fef2f2;
+            color: #991b1b;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        .ok {
+            border: 1px solid #86efac;
+            background: #f0fdf4;
+            color: #14532d;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .metric {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 10px;
+            background: #f9fafb;
+        }
+        .hint {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        code {
+            background: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1>Запуск геофизического пайплайна</h1>
+        <p class="hint">
+            Форма запускает тот же процесс, что и CLI, и генерирует
+            <code>DXF</code>, <code>XML</code>, <code>DOCX</code> в каталоге output.
+        </p>
+    </div>
+
+    <div class="card">
+        {% if error %}
+            <div class="error">{{ error }}</div>
+        {% endif %}
+
+        <form action="/run" method="post">
+            <label for="magnetic_grid">Путь к магнитной сетке (.npy)</label>
+            <input id="magnetic_grid" name="magnetic_grid" type="text" value="{{ form_values.magnetic_grid }}" required>
+
+            <label for="anomalies">Путь к аномалиям (.gpkg)</label>
+            <input id="anomalies" name="anomalies" type="text" value="{{ form_values.anomalies }}" required>
+
+            <label for="utilities">Путь к коммуникациям (.gpkg)</label>
+            <input id="utilities" name="utilities" type="text" value="{{ form_values.utilities }}" required>
+
+            <label for="output_dir">Каталог вывода</label>
+            <input id="output_dir" name="output_dir" type="text" value="{{ form_values.output_dir }}" required>
+
+            <label for="anomaly_threshold">Порог детекции (нТл)</label>
+            <input id="anomaly_threshold" name="anomaly_threshold" type="number" step="0.1" min="0" value="{{ form_values.anomaly_threshold }}" required>
+
+            <button type="submit">Запустить пайплайн</button>
+        </form>
+    </div>
+
+    {% if summary %}
+    <div class="card">
+        <div class="ok">Пайплайн завершён успешно.</div>
+
+        <div class="grid">
+            <div class="metric">
+                <strong>Детектировано по сетке:</strong><br>
+                {{ summary.detected_count }}
+            </div>
+            <div class="metric">
+                <strong>Аномалий в выходном слое:</strong><br>
+                {{ summary.anomalies_count }}
+            </div>
+            <div class="metric">
+                <strong>Проблем валидации:</strong><br>
+                {{ summary.validation_issues }}
+            </div>
+        </div>
+
+        <h2>Артефакты</h2>
+        <ul>
+            <li>
+                DXF:
+                {% if summary.dxf_url %}
+                    <a href="{{ summary.dxf_url }}" target="_blank">{{ summary.dxf_path }}</a>
+                {% else %}
+                    {{ summary.dxf_path }}
+                {% endif %}
+            </li>
+            <li>
+                XML:
+                {% if summary.xml_url %}
+                    <a href="{{ summary.xml_url }}" target="_blank">{{ summary.xml_path }}</a>
+                {% else %}
+                    {{ summary.xml_path }}
+                {% endif %}
+            </li>
+            <li>
+                DOCX:
+                {% if summary.act_url %}
+                    <a href="{{ summary.act_url }}" target="_blank">{{ summary.act_path }}</a>
+                {% else %}
+                    {{ summary.act_path }}
+                {% endif %}
+            </li>
+        </ul>
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>
