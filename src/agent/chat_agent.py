@@ -4,12 +4,16 @@ import logging
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _agent_lock = threading.Lock()
 _cached_agent = None
+_MAX_HISTORY_MESSAGES = int(os.getenv("CHAT_AGENT_MAX_HISTORY", "10"))
+_MAX_PROMPT_CHARS = int(os.getenv("CHAT_AGENT_MAX_PROMPT_CHARS", "12000"))
+_CALL_TIMEOUT_SECONDS = float(os.getenv("CHAT_AGENT_TIMEOUT_SEC", "20"))
 
 
 def _get_agent():
@@ -28,7 +32,7 @@ def _compose_prompt(
     latest_run: dict[str, Any] | None = None,
 ) -> str:
     history = []
-    for msg in (session_messages or [])[-8:]:
+    for msg in (session_messages or [])[-_MAX_HISTORY_MESSAGES:]:
         role = msg.get("role", "user")
         content = str(msg.get("content", "")).strip()
         if content:
@@ -40,7 +44,11 @@ def _compose_prompt(
         "Учитывай ТЗ: МИИС/GeoTIFF/SEG-Y, СП 47, СП 11-102-97, буферный анализ, риск-классы.",
     ]
     if latest_run:
-        context_lines.append(f"Контекст последнего запуска: {latest_run}")
+        compact_latest_run = dict(latest_run)
+        compact_latest_run.pop("risk_details", None)
+        compact_latest_run.pop("validation_issue_details", None)
+        compact_latest_run.pop("validation_report", None)
+        context_lines.append(f"Контекст последнего запуска: {compact_latest_run}")
 
     prompt_parts = [
         "\n".join(context_lines),
@@ -51,7 +59,17 @@ def _compose_prompt(
         f"Новый вопрос пользователя: {message}",
         "Сформируй полезный технический ответ.",
     ]
-    return "\n".join(prompt_parts)
+    prompt = "\n".join(prompt_parts)
+    if len(prompt) > _MAX_PROMPT_CHARS:
+        # Сохраняем конец (последний вопрос + релевантный контекст), чтобы не терять intent.
+        prompt = prompt[-_MAX_PROMPT_CHARS:]
+    return prompt
+
+
+def _invoke_with_timeout(agent: Any, prompt: str, timeout_seconds: float) -> Any:
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(agent.invoke, {"input": prompt})
+        return future.result(timeout=timeout_seconds)
 
 
 def _fallback_answer(
@@ -116,7 +134,7 @@ def ask_agent(
                 session_messages=session_messages,
                 latest_run=latest_run,
             )
-            result = agent.invoke({"input": prompt})
+            result = _invoke_with_timeout(agent, prompt, _CALL_TIMEOUT_SECONDS)
             if isinstance(result, dict):
                 output = (
                     result.get("output")
@@ -128,6 +146,12 @@ def ask_agent(
                 output = str(result)
             output = re.sub(r"\n{3,}", "\n\n", output).strip()
             return {"answer": output, "mode": "llm"}
+        except FuturesTimeoutError:
+            logger.warning("Таймаут ответа LLM-агента, используем fallback")
+            return {
+                "answer": _fallback_answer(message, latest_run),
+                "mode": "fallback_timeout",
+            }
         except Exception as exc:  # noqa: BLE001
             logger.exception("LLM-агент недоступен, используем fallback")
             return {
