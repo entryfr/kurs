@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from src.ai_agent_course.orchestrator import EngineeringSurveyAgent
+from src.ai_agent_course.secrets_loader import load_local_env
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    load_local_env(Path(__file__).resolve().parent / ".env.local")
     args = build_parser().parse_args()
     agent = EngineeringSurveyAgent()
     result = agent.run(

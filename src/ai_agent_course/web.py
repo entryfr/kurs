@@ -13,10 +13,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.ai_agent_course.orchestrator import EngineeringSurveyAgent
+from src.ai_agent_course.secrets_loader import load_local_env
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_local_env(PROJECT_ROOT / ".env.local")
 CACHE_ROOT = (PROJECT_ROOT / ".cache" / "agent_v2").resolve()
 RUNS_DIR = CACHE_ROOT / "runs"
 UPLOADS_DIR = CACHE_ROOT / "uploads"
