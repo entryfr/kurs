@@ -25,6 +25,8 @@ def _fake_summary() -> dict:
         "blind_zone_anomalies_count": 1,
         "corrosion_critical_count": 1,
         "corrosion_warnings": ["Аномалия #0: Требуется срочная замена во избежание аварии."],
+        "linear_anomalies_filtered_count": 0,
+        "linear_anomaly_min_length_m": 10.0,
         "dxf_path": "output/scheme.dxf",
         "xml_path": "output/miis.xml",
         "act_path": "output/act.docx",

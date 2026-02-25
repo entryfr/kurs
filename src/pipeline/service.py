@@ -249,6 +249,41 @@ def _detect_blind_zones(
     return zones
 
 
+def _apply_linear_threshold(
+    anomalies_gdf: gpd.GeoDataFrame,
+    min_length_m: float = 10.0,
+) -> tuple[gpd.GeoDataFrame, int]:
+    if anomalies_gdf.empty:
+        copy = anomalies_gdf.copy()
+        copy["is_linear_anomaly"] = []
+        copy["linear_length_m"] = []
+        copy["tz_linear_eligible"] = []
+        return copy, 0
+
+    measure_frame = anomalies_gdf
+    if anomalies_gdf.crs is not None:
+        try:
+            from pyproj import CRS
+
+            if not CRS.from_user_input(anomalies_gdf.crs).is_projected:
+                measure_frame = anomalies_gdf.to_crs(settings.CRS_UTM37N)
+        except Exception:  # noqa: BLE001
+            # Если CRS не распознана, считаем длину в текущей системе.
+            measure_frame = anomalies_gdf
+
+    is_linear = measure_frame.geometry.geom_type.isin(["LineString", "MultiLineString"])
+    lengths = measure_frame.geometry.length.where(is_linear, np.nan)
+
+    enriched = anomalies_gdf.copy()
+    enriched["is_linear_anomaly"] = is_linear.values
+    enriched["linear_length_m"] = lengths.values
+    enriched["tz_linear_eligible"] = (~is_linear) | (lengths > min_length_m)
+
+    dropped_count = int((is_linear & (lengths <= min_length_m)).sum())
+    filtered = enriched[enriched["tz_linear_eligible"]].copy()
+    return filtered, dropped_count
+
+
 def _extract_nearby_depths(
     utility_indexes: list[int],
     utilities_gdf: gpd.GeoDataFrame,
@@ -436,6 +471,10 @@ def run_pipeline(
         utilities_path=utilities_path,
         miis_xml_path=miis_xml_path,
     )
+    anomalies_gdf, filtered_linear_count = _apply_linear_threshold(
+        anomalies_gdf,
+        min_length_m=10.0,
+    )
     construction_zones_gdf = _load_construction_zones(
         construction_zones_path=construction_zones_path,
         target_crs=anomalies_gdf.crs,
@@ -592,6 +631,8 @@ def run_pipeline(
         "blind_zone_anomalies_count": int(result_gdf["in_blind_zone"].sum()),
         "corrosion_critical_count": int(result_gdf["corrosion_critical"].sum()),
         "corrosion_warnings": corrosion_warnings,
+        "linear_anomalies_filtered_count": filtered_linear_count,
+        "linear_anomaly_min_length_m": 10.0,
         "dxf_path": str(dxf_path),
         "xml_path": str(xml_path),
         "act_path": str(act_path),
