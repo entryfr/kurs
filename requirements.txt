@@ -1,40 +1,25 @@
-# Геопространственные
+# Core
+numpy
+opencv-python
+scikit-learn
+catboost
+
+# Geo / formats
 pyproj
 geopandas
 shapely
-rasterio
-fiona
-pandas
-# База данных
-psycopg2-binary
-sqlalchemy
-geoalchemy2
-# Численные методы
-numpy
-scipy
-pywavelets
-opencv-python
-scikit-image
-scikit-learn
-catboost
-# Работа с SEG-Y
-segyio
-# Генерация документов
-jinja2
-python-docx
-ezdxf
 lxml
+ezdxf
+
+# Reports
+jinja2
 matplotlib
-# AI-агент
-langchain
-langchain-community
+
+# AI + API
 langchain-anthropic
-pydantic
-requests
-# Веб-интерфейс
 fastapi
 uvicorn
 python-multipart
-httpx
-# Тестирование
+
+# Tests
 pytest
