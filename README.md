@@ -8,15 +8,24 @@
 1. Загружает входные данные:
    - магнитную сетку (`.npy` или `GeoTIFF`);
    - обнаруженные аномалии и коммуникации (`.gpkg`) либо из `MIIS XML`;
+   - опциональные зоны строительства (`.gpkg`);
    - опциональные признаки из `SEG-Y`.
 2. Выполняет детекцию линейных аномалий на магнитной карте.
-3. Определяет вероятный тип коммуникации для каждой аномалии.
-4. Классифицирует уровень риска (`LOW` / `HIGH` / `CRITICAL`).
-5. Проверяет нормативные условия (модуль `validator`).
-6. Генерирует артефакты отчётности:
+3. Фильтрует короткие линейные аномалии (`<=10 м`) по ТЗ.
+4. Определяет вероятный тип коммуникации для каждой аномалии.
+5. Классифицирует уровень риска (`LOW` / `HIGH` / `CRITICAL`) c приоритетом ТЗ-правил:
+   - `CRITICAL` = `89%` (нет пересечения с учтёнными + в зоне строительства),
+   - `HIGH` = `62%` (есть пересечение, но рассогласование глубины `>0.5 м`),
+   - `LOW` = `12%` (совпадение по координате/глубине).
+6. Выделяет «слепые зоны» по магнитной карте и учитывает их в объяснениях риска.
+7. Выполняет оценку остаточного ресурса коммуникации (коррозия) и формирует предупреждения.
+8. Проверяет нормативные условия (модуль `validator`).
+9. Генерирует артефакты отчётности:
    - `scheme.dxf`
    - `miis.xml`
+   - `mins_exchange.xml`
    - `act.docx`
+   - `act.pdf` (если доступен `reportlab`)
 
 ## Структура проекта
 
@@ -53,6 +62,7 @@ python main.py \
   --magnetic-grid data/raw/magnetic_grid.npy \
   --anomalies data/processed/anomalies.gpkg \
   --utilities data/processed/utilities.gpkg \
+  --construction-zones data/processed/construction_zones.gpkg \
   --output-dir output \
   --anomaly-threshold 30.0 \
   --norms-profile normative
@@ -108,6 +118,7 @@ curl -X POST "http://localhost:8000/api/run" \
     "magnetic_grid": "data/raw/magnetic_grid.npy",
     "anomalies": "data/processed/anomalies.gpkg",
     "utilities": "data/processed/utilities.gpkg",
+    "construction_zones": "data/processed/construction_zones.gpkg",
     "miis_xml": "",
     "segy_file": "",
     "output_dir": "output",
@@ -157,6 +168,12 @@ pytest tests/test_utility_type_identifier.py -v
 pytest tests/test_web_app.py -v
 pytest tests/test_input_loader.py -v
 pytest tests/test_validator_rules.py -v
+pytest tests/test_risk_tz_rules.py -v
+pytest tests/test_blind_zone_pipeline.py -v
+pytest tests/test_corrosion_pipeline.py -v
+pytest tests/test_linear_threshold.py -v
+pytest tests/test_act_generator.py -v
+pytest tests/test_mins_exporter.py -v
 ```
 
 ## Текущий статус
