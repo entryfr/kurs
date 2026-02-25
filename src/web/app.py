@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAGNETIC_GRID = "data/raw/magnetic_grid.npy"
 DEFAULT_ANOMALIES = "data/processed/anomalies.gpkg"
 DEFAULT_UTILITIES = "data/processed/utilities.gpkg"
+DEFAULT_CONSTRUCTION_ZONES = ""
 DEFAULT_MIIS_XML = ""
 DEFAULT_SEGY = ""
 DEFAULT_OUTPUT_DIR = "output"
@@ -49,6 +50,7 @@ class PipelineRunRequest(BaseModel):
     magnetic_grid: str = Field(default=DEFAULT_MAGNETIC_GRID)
     anomalies: str | None = Field(default=DEFAULT_ANOMALIES)
     utilities: str | None = Field(default=DEFAULT_UTILITIES)
+    construction_zones: str | None = Field(default=None)
     miis_xml: str | None = Field(default=None)
     segy_file: str | None = Field(default=None)
     output_dir: str = Field(default=DEFAULT_OUTPUT_DIR)
@@ -145,6 +147,7 @@ def _apply_upload_overrides(
     magnetic_grid_file: UploadFile | None = None,
     anomalies_file: UploadFile | None = None,
     utilities_file: UploadFile | None = None,
+    construction_zones_file: UploadFile | None = None,
     miis_xml_file: UploadFile | None = None,
     segy_upload_file: UploadFile | None = None,
 ) -> dict[str, Any]:
@@ -152,6 +155,7 @@ def _apply_upload_overrides(
         (magnetic_grid_file, "magnetic_grid", "magnetic"),
         (anomalies_file, "anomalies", "anomalies"),
         (utilities_file, "utilities", "utilities"),
+        (construction_zones_file, "construction_zones", "construction"),
         (miis_xml_file, "miis_xml", "miis"),
         (segy_upload_file, "segy_file", "segy"),
     ]
@@ -171,6 +175,7 @@ def _execute(request_data: PipelineRunRequest) -> dict[str, Any]:
     magnetic_grid_path = _resolve_project_path(request_data.magnetic_grid)
     anomalies_path = _resolve_optional_project_path(request_data.anomalies)
     utilities_path = _resolve_optional_project_path(request_data.utilities)
+    construction_zones_path = _resolve_optional_project_path(request_data.construction_zones)
     miis_xml_path = _resolve_optional_project_path(request_data.miis_xml)
     segy_path = _resolve_optional_project_path(request_data.segy_file)
     output_dir = _resolve_project_path(request_data.output_dir)
@@ -185,6 +190,8 @@ def _execute(request_data: PipelineRunRequest) -> dict[str, Any]:
             )
         _validate_input_file(anomalies_path, "anomalies")
         _validate_input_file(utilities_path, "utilities")
+    if construction_zones_path is not None:
+        _validate_input_file(construction_zones_path, "construction_zones")
     if segy_path is not None:
         _validate_input_file(segy_path, "segy_file")
 
@@ -196,6 +203,7 @@ def _execute(request_data: PipelineRunRequest) -> dict[str, Any]:
         anomaly_threshold=request_data.anomaly_threshold,
         miis_xml_path=miis_xml_path,
         segy_path=segy_path,
+        construction_zones_path=construction_zones_path,
         norms_profile=request_data.norms_profile,
     )
 
@@ -237,6 +245,7 @@ def _default_form_values() -> dict[str, Any]:
         "magnetic_grid": DEFAULT_MAGNETIC_GRID,
         "anomalies": DEFAULT_ANOMALIES,
         "utilities": DEFAULT_UTILITIES,
+        "construction_zones": DEFAULT_CONSTRUCTION_ZONES,
         "miis_xml": DEFAULT_MIIS_XML,
         "segy_file": DEFAULT_SEGY,
         "output_dir": DEFAULT_OUTPUT_DIR,
@@ -310,6 +319,7 @@ def run_from_form(
     magnetic_grid: str = Form(DEFAULT_MAGNETIC_GRID),
     anomalies: str = Form(DEFAULT_ANOMALIES),
     utilities: str = Form(DEFAULT_UTILITIES),
+    construction_zones: str = Form(DEFAULT_CONSTRUCTION_ZONES),
     miis_xml: str = Form(DEFAULT_MIIS_XML),
     segy_file: str = Form(DEFAULT_SEGY),
     output_dir: str = Form(DEFAULT_OUTPUT_DIR),
@@ -318,6 +328,7 @@ def run_from_form(
     magnetic_grid_file: UploadFile | None = File(default=None),
     anomalies_file: UploadFile | None = File(default=None),
     utilities_file: UploadFile | None = File(default=None),
+    construction_zones_file: UploadFile | None = File(default=None),
     miis_xml_file: UploadFile | None = File(default=None),
     segy_upload_file: UploadFile | None = File(default=None),
 ) -> HTMLResponse:
@@ -325,6 +336,7 @@ def run_from_form(
         "magnetic_grid": magnetic_grid,
         "anomalies": anomalies,
         "utilities": utilities,
+        "construction_zones": construction_zones,
         "miis_xml": miis_xml,
         "segy_file": segy_file,
         "output_dir": output_dir,
@@ -336,6 +348,7 @@ def run_from_form(
         magnetic_grid_file=magnetic_grid_file,
         anomalies_file=anomalies_file,
         utilities_file=utilities_file,
+        construction_zones_file=construction_zones_file,
         miis_xml_file=miis_xml_file,
         segy_upload_file=segy_upload_file,
     )
@@ -361,6 +374,7 @@ def run_async_from_form(
     magnetic_grid: str = Form(DEFAULT_MAGNETIC_GRID),
     anomalies: str = Form(DEFAULT_ANOMALIES),
     utilities: str = Form(DEFAULT_UTILITIES),
+    construction_zones: str = Form(DEFAULT_CONSTRUCTION_ZONES),
     miis_xml: str = Form(DEFAULT_MIIS_XML),
     segy_file: str = Form(DEFAULT_SEGY),
     output_dir: str = Form(DEFAULT_OUTPUT_DIR),
@@ -369,6 +383,7 @@ def run_async_from_form(
     magnetic_grid_file: UploadFile | None = File(default=None),
     anomalies_file: UploadFile | None = File(default=None),
     utilities_file: UploadFile | None = File(default=None),
+    construction_zones_file: UploadFile | None = File(default=None),
     miis_xml_file: UploadFile | None = File(default=None),
     segy_upload_file: UploadFile | None = File(default=None),
 ) -> HTMLResponse:
@@ -376,6 +391,7 @@ def run_async_from_form(
         "magnetic_grid": magnetic_grid,
         "anomalies": anomalies,
         "utilities": utilities,
+        "construction_zones": construction_zones,
         "miis_xml": miis_xml,
         "segy_file": segy_file,
         "output_dir": output_dir,
@@ -387,6 +403,7 @@ def run_async_from_form(
         magnetic_grid_file=magnetic_grid_file,
         anomalies_file=anomalies_file,
         utilities_file=utilities_file,
+        construction_zones_file=construction_zones_file,
         miis_xml_file=miis_xml_file,
         segy_upload_file=segy_upload_file,
     )

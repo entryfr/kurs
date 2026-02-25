@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -18,9 +19,11 @@ from src.agent.validator import (
 from src.classification.risk_classifier import RiskClassifier
 from src.classification.utility_type_identifier import UtilityTypeIdentifier
 from src.detection.anomaly_detector import detect_linear_anomalies
+from src.detection.buffer_analysis import check_utilities_in_buffer
 from src.preprocessing.input_loader import (
     load_anomalies_and_utilities,
     load_magnetic_grid,
+    load_vector_layer,
 )
 from src.preprocessing.segy_reader import extract_segy_features
 from src.reporting.act_generator import generate_act
@@ -91,14 +94,17 @@ def _build_identifier_features(
 
 
 def _build_risk_features(
-    row: gpd.GeoSeries, utility_type: str, segy_features: dict[str, float] | None = None
+    row: gpd.GeoSeries,
+    utility_type: str,
+    segy_features: dict[str, float] | None = None,
+    excavation_depth: float = 3.0,
 ) -> dict[str, Any]:
     detection_factor = 0.7
     if segy_features and "segy_confidence" in segy_features:
         detection_factor = float(np.clip(segy_features["segy_confidence"], 0.1, 0.99))
 
     return {
-        "excavation_depth": 3.0,
+        "excavation_depth": excavation_depth,
         "anomaly_depth": _safe_float(row.get("depth"), 2.0),
         "utility_type": utility_type,
         "detection_factor": detection_factor,
@@ -106,6 +112,11 @@ def _build_risk_features(
 
 
 def _risk_confidence(risk_class: str, row: gpd.GeoSeries) -> float:
+    if "risk_probability" in row and row.get("risk_probability") is not None:
+        prob = _safe_float(row.get("risk_probability"), 0.0)
+        if prob > 0:
+            return float(np.clip(prob, 0.05, 0.99))
+
     base = {"CRITICAL": 0.9, "HIGH": 0.75, "LOW": 0.6}.get(risk_class, 0.5)
     intensity_boost = 0.0
     if "intensity" in row:
@@ -135,6 +146,123 @@ def _build_anomaly_issue_map(issues: list[str]) -> dict[int, list[str]]:
     return issue_map
 
 
+def _load_construction_zones(
+    construction_zones_path: Path | None,
+    target_crs,
+) -> gpd.GeoDataFrame:
+    if construction_zones_path is None:
+        return gpd.GeoDataFrame(
+            columns=["geometry"],
+            geometry="geometry",
+            crs=target_crs,
+        )
+
+    zones = load_vector_layer(construction_zones_path, "зоны строительства")
+    if zones.crs != target_crs:
+        zones = zones.to_crs(target_crs)
+    return zones
+
+
+def _depth_value(raw_value: Any) -> float | None:
+    if raw_value is None:
+        return None
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(value):
+        return None
+    return value
+
+
+def _construction_depth_column(zones_gdf: gpd.GeoDataFrame) -> str | None:
+    candidates = [
+        "excavation_depth",
+        "construction_depth",
+        "depth_excavation",
+        "planned_depth",
+        "depth",
+    ]
+    lower_map = {str(col).lower(): col for col in zones_gdf.columns}
+    for candidate in candidates:
+        if candidate in lower_map:
+            return lower_map[candidate]
+    return None
+
+
+def _compute_zone_flags(
+    anomalies_gdf: gpd.GeoDataFrame,
+    zones_gdf: gpd.GeoDataFrame,
+) -> tuple[dict[int, bool], dict[int, float | None]]:
+    if zones_gdf.empty:
+        return ({int(idx): False for idx in anomalies_gdf.index}, {int(idx): None for idx in anomalies_gdf.index})
+
+    depth_col = _construction_depth_column(zones_gdf)
+    in_zone: dict[int, bool] = {}
+    excavation_depth: dict[int, float | None] = {}
+
+    for idx, row in anomalies_gdf.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            in_zone[int(idx)] = False
+            excavation_depth[int(idx)] = None
+            continue
+
+        intersections = zones_gdf[zones_gdf.intersects(geom)]
+        in_zone[int(idx)] = not intersections.empty
+        if intersections.empty or depth_col is None:
+            excavation_depth[int(idx)] = None
+            continue
+
+        depths = [_depth_value(v) for v in intersections[depth_col].tolist()]
+        valid_depths = [d for d in depths if d is not None]
+        excavation_depth[int(idx)] = max(valid_depths) if valid_depths else None
+
+    return in_zone, excavation_depth
+
+
+def _extract_nearby_depths(
+    utility_indexes: list[int],
+    utilities_gdf: gpd.GeoDataFrame,
+) -> list[float]:
+    if not utility_indexes or "depth" not in utilities_gdf.columns:
+        return []
+    depths: list[float] = []
+    for utility_idx in utility_indexes:
+        if utility_idx not in utilities_gdf.index:
+            continue
+        depth = _depth_value(utilities_gdf.loc[utility_idx].get("depth"))
+        if depth is not None:
+            depths.append(depth)
+    return depths
+
+
+def _classify_risk_tz(
+    row: gpd.GeoSeries,
+    utilities_gdf: gpd.GeoDataFrame,
+    model_risk_class: str,
+    model_probability: float,
+    in_construction_zone: bool,
+) -> tuple[str, float, str, float | None]:
+    utility_indexes = row.get("utilities_in_buffer", [])
+    if not isinstance(utility_indexes, list):
+        utility_indexes = []
+    has_utility = bool(utility_indexes)
+    anomaly_depth = _depth_value(row.get("depth"))
+
+    if in_construction_zone and not has_utility:
+        return ("CRITICAL", 0.89, "TZ_RULE_CRITICAL_NO_MATCH_IN_CONSTRUCTION", None)
+
+    nearby_depths = _extract_nearby_depths(utility_indexes, utilities_gdf)
+    if has_utility and anomaly_depth is not None and nearby_depths:
+        min_diff = min(abs(anomaly_depth - d) for d in nearby_depths)
+        if min_diff > 0.5:
+            return ("HIGH", 0.62, "TZ_RULE_DEPTH_MISMATCH", min_diff)
+        return ("LOW", 0.12, "TZ_RULE_DEPTH_MATCH", min_diff)
+
+    return (model_risk_class, model_probability, "MODEL_FALLBACK", None)
+
+
 def _build_risk_explanations(
     result_gdf: gpd.GeoDataFrame, issue_map: dict[int, list[str]] | None = None
 ) -> list[dict[str, Any]]:
@@ -157,8 +285,10 @@ def _build_risk_explanations(
             {
                 "anomaly_id": int(idx),
                 "risk_class": risk_class,
+                "risk_probability": _safe_float(row.get("risk_probability"), _risk_confidence(risk_class, row)),
                 "utility_type": utility_type,
                 "confidence": _risk_confidence(risk_class, row),
+                "risk_rule": row.get("risk_rule", "UNKNOWN"),
                 "reasons": reasons,
                 "norm_violations": issue_map.get(int(idx), []) if issue_map else [],
             }
@@ -174,6 +304,7 @@ def run_pipeline(
     anomaly_threshold: float,
     miis_xml_path: Path | None = None,
     segy_path: Path | None = None,
+    construction_zones_path: Path | None = None,
     norms_profile: str = settings.DEFAULT_NORMS_PROFILE,
 ) -> dict[str, Any]:
     if norms_profile not in settings.NORMATIVE_PROFILES:
@@ -190,6 +321,13 @@ def run_pipeline(
         utilities_path=utilities_path,
         miis_xml_path=miis_xml_path,
     )
+    construction_zones_gdf = _load_construction_zones(
+        construction_zones_path=construction_zones_path,
+        target_crs=anomalies_gdf.crs,
+    )
+
+    if not utilities_gdf.empty and utilities_gdf.crs != anomalies_gdf.crs:
+        utilities_gdf = utilities_gdf.to_crs(anomalies_gdf.crs)
 
     segy_features: dict[str, float] = {}
     if segy_path is not None:
@@ -205,6 +343,24 @@ def run_pipeline(
     identifier = UtilityTypeIdentifier()
     result_gdf = anomalies_gdf.copy()
 
+    logger.info("Буферный анализ коммуникаций...")
+    result_gdf = check_utilities_in_buffer(
+        result_gdf,
+        utilities_gdf,
+        buffer_dist=float(profile["buffer_distance"]),
+    )
+    result_gdf["utilities_in_buffer"] = result_gdf["utilities_in_buffer"].apply(
+        lambda value: value if isinstance(value, list) else []
+    )
+
+    in_zone_map, excavation_depth_map = _compute_zone_flags(
+        anomalies_gdf=result_gdf,
+        zones_gdf=construction_zones_gdf,
+    )
+    result_gdf["in_construction_zone"] = result_gdf.index.map(
+        lambda idx: in_zone_map.get(int(idx), False)
+    )
+
     logger.info("Определение типа коммуникаций...")
     result_gdf["utility_type"] = result_gdf.apply(
         lambda row: identifier.predict(_build_identifier_features(row, segy_features)),
@@ -212,12 +368,33 @@ def run_pipeline(
     )
 
     logger.info("Классификация риска...")
-    result_gdf["risk_class"] = result_gdf.apply(
+    result_gdf["risk_class_model"] = result_gdf.apply(
         lambda row: classifier.predict_risk(
-            _build_risk_features(row, row["utility_type"], segy_features)
+            _build_risk_features(
+                row,
+                row["utility_type"],
+                segy_features,
+                excavation_depth=excavation_depth_map.get(int(row.name)) or 3.0,
+            )
         ),
         axis=1,
     )
+    model_probability_map = {"CRITICAL": 0.8, "HIGH": 0.65, "LOW": 0.2}
+
+    tz_results = result_gdf.apply(
+        lambda row: _classify_risk_tz(
+            row=row,
+            utilities_gdf=utilities_gdf,
+            model_risk_class=row["risk_class_model"],
+            model_probability=model_probability_map.get(row["risk_class_model"], 0.5),
+            in_construction_zone=bool(row.get("in_construction_zone", False)),
+        ),
+        axis=1,
+    )
+    result_gdf["risk_class"] = tz_results.apply(lambda x: x[0])
+    result_gdf["risk_probability"] = tz_results.apply(lambda x: x[1])
+    result_gdf["risk_rule"] = tz_results.apply(lambda x: x[2])
+    result_gdf["depth_mismatch_m"] = tz_results.apply(lambda x: x[3])
 
     logger.info("Нормативная валидация...")
     validation_errors = validate_anomalies(

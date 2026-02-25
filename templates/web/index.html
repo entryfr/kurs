@@ -123,6 +123,11 @@
             <label for="utilities_file">или загрузка коммуникаций</label>
             <input id="utilities_file" name="utilities_file" type="file" accept=".gpkg">
 
+            <label for="construction_zones">Путь к зонам строительства (.gpkg, опционально)</label>
+            <input id="construction_zones" name="construction_zones" type="text" value="{{ form_values.construction_zones }}">
+            <label for="construction_zones_file">или загрузка зон строительства</label>
+            <input id="construction_zones_file" name="construction_zones_file" type="file" accept=".gpkg">
+
             <label for="miis_xml">Путь к MIIS XML (опционально, переопределяет слои)</label>
             <input id="miis_xml" name="miis_xml" type="text" value="{{ form_values.miis_xml }}">
             <label for="miis_xml_file">или загрузка MIIS XML</label>

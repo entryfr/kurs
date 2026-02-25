@@ -26,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Путь к GeoPackage с учтёнными коммуникациями.",
     )
     parser.add_argument(
+        "--construction-zones",
+        default=None,
+        help="Опциональный путь к GeoPackage с зонами строительства.",
+    )
+    parser.add_argument(
         "--output-dir",
         default="output",
         help="Каталог для выходных файлов DXF/XML/DOCX.",
@@ -69,6 +74,7 @@ def main() -> None:
         anomaly_threshold=args.anomaly_threshold,
         miis_xml_path=Path(args.miis_xml) if args.miis_xml else None,
         segy_path=Path(args.segy) if args.segy else None,
+        construction_zones_path=Path(args.construction_zones) if args.construction_zones else None,
         norms_profile=args.norms_profile,
     )
 
