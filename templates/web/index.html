@@ -238,6 +238,16 @@
                     {{ summary.act_path }}
                 {% endif %}
             </li>
+            {% if summary.act_pdf_path %}
+            <li>
+                PDF:
+                {% if summary.act_pdf_url %}
+                    <a href="{{ summary.act_pdf_url }}" target="_blank">{{ summary.act_pdf_path }}</a>
+                {% else %}
+                    {{ summary.act_pdf_path }}
+                {% endif %}
+            </li>
+            {% endif %}
         </ul>
 
         {% if summary.validation_issues_by_rule %}

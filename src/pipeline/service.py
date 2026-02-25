@@ -8,6 +8,7 @@ from typing import Any
 
 import geopandas as gpd
 import numpy as np
+from shapely.geometry import LineString, MultiLineString, Point
 
 from config import settings
 from src.agent.validator import (
@@ -446,6 +447,63 @@ def _build_risk_explanations(
     return explanations
 
 
+def _format_geometry_coordinates(geometry) -> str:
+    if geometry is None or geometry.is_empty:
+        return "-"
+    if isinstance(geometry, Point):
+        return f"({geometry.x:.1f}, {geometry.y:.1f})"
+    if isinstance(geometry, LineString):
+        start = geometry.coords[0]
+        end = geometry.coords[-1]
+        return f"({start[0]:.1f}, {start[1]:.1f}) -> ({end[0]:.1f}, {end[1]:.1f})"
+    if isinstance(geometry, MultiLineString):
+        first = list(geometry.geoms)[0]
+        start = first.coords[0]
+        last = list(geometry.geoms)[-1]
+        end = last.coords[-1]
+        return f"({start[0]:.1f}, {start[1]:.1f}) -> ({end[0]:.1f}, {end[1]:.1f})"
+    centroid = geometry.centroid
+    return f"~({centroid.x:.1f}, {centroid.y:.1f})"
+
+
+def _recommendation_by_tz(risk_class: str, utility_type: str, depth_m: float | None) -> str:
+    if risk_class == "CRITICAL":
+        if depth_m is None or depth_m <= 3.0:
+            return "Шурф №III-247"
+        return "Георадар ЛОМА-5"
+    if risk_class == "HIGH":
+        return "Георадар ЛОМА-5"
+    if utility_type == "sewage":
+        return "Видеозондирование"
+    return "Инженерное уточнение трассы"
+
+
+def _build_act_anomaly_rows(result_gdf: gpd.GeoDataFrame) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for idx, row in result_gdf.iterrows():
+        depth_m = _depth_value(row.get("depth"))
+        length_m = _depth_value(row.get("linear_length_m"))
+        risk_probability = _safe_float(row.get("risk_probability"), 0.0)
+        utility_type = str(row.get("utility_type", "unknown"))
+        rows.append(
+            {
+                "anomaly_id": int(idx),
+                "risk_class": row.get("risk_class", "LOW"),
+                "risk_probability": f"{risk_probability * 100:.0f}%",
+                "utility_type": utility_type,
+                "depth_m": f"{depth_m:.2f}" if depth_m is not None else "-",
+                "length_m": f"{length_m:.2f}" if length_m is not None else "-",
+                "coordinates": _format_geometry_coordinates(row.get("geometry")),
+                "recommendation": _recommendation_by_tz(
+                    str(row.get("risk_class", "LOW")),
+                    utility_type,
+                    depth_m,
+                ),
+            }
+        )
+    return rows
+
+
 def run_pipeline(
     magnetic_grid_path: Path,
     anomalies_path: Path,
@@ -594,18 +652,21 @@ def run_pipeline(
     dxf_path = output_dir / "scheme.dxf"
     xml_path = output_dir / "miis.xml"
     act_path = output_dir / "act.docx"
+    act_pdf_path = output_dir / "act.pdf"
 
     logger.info("Экспорт результатов...")
     export_to_dxf(result_gdf, utilities_gdf, blind_zones_gdf, str(dxf_path))
     create_miis_xml(result_gdf, utilities_gdf, str(xml_path))
-    generate_act(
-        {
+    act_result = generate_act(
+        data={
             "date": date.today().isoformat(),
             "anomalies": len(result_gdf),
             "issues": all_issues,
             "profile": norms_profile,
+            "anomaly_rows": _build_act_anomaly_rows(result_gdf),
         },
         output_path=str(act_path),
+        pdf_output_path=str(act_pdf_path),
     )
 
     issue_map = _build_anomaly_issue_map(all_issues)
@@ -635,5 +696,6 @@ def run_pipeline(
         "linear_anomaly_min_length_m": 10.0,
         "dxf_path": str(dxf_path),
         "xml_path": str(xml_path),
-        "act_path": str(act_path),
+        "act_path": act_result["docx_path"],
+        "act_pdf_path": act_result["pdf_path"],
     }

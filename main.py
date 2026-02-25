@@ -83,6 +83,8 @@ def main() -> None:
     print(f"  - {summary['dxf_path']}")
     print(f"  - {summary['xml_path']}")
     print(f"  - {summary['act_path']}")
+    if summary.get("act_pdf_path"):
+        print(f"  - {summary['act_pdf_path']}")
     print(f"  - Режим входа: {summary['input_mode']}")
     print(f"  - Профиль норм: {summary['norms_profile']}")
 

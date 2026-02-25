@@ -30,6 +30,7 @@ def _fake_summary() -> dict:
         "dxf_path": "output/scheme.dxf",
         "xml_path": "output/miis.xml",
         "act_path": "output/act.docx",
+        "act_pdf_path": None,
     }
 
 
