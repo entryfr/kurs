@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -177,8 +178,11 @@ def test_run_form_with_uploaded_files(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "Пайплайн завершён успешно" in response.text
-    assert ".cache/web/uploads" in str(captured["magnetic_grid_path"])
-    assert ".cache/web/uploads" in str(captured["miis_xml_path"])
+    magnetic_parts = Path(captured["magnetic_grid_path"]).parts
+    miis_parts = Path(captured["miis_xml_path"]).parts
+    for expected_part in (".cache", "web", "uploads"):
+        assert expected_part in magnetic_parts
+        assert expected_part in miis_parts
 
 
 def test_chat_page_loads() -> None:
