@@ -26,6 +26,8 @@
    - `mins_exchange.xml`
    - `act.docx`
    - `act.pdf` (если доступен `reportlab`)
+10. Опционально сохраняет результаты запусков в PostgreSQL/PostGIS
+    (таблицы запусков и аномалий + API чтения истории из БД).
 
 ## Структура проекта
 
@@ -108,6 +110,21 @@ python web_app.py
 - web-страница диалога с сессиями;
 - API endpoint для сообщений (`POST /api/chat`);
 - API истории (`GET /api/chat/sessions`, `GET /api/chat/sessions/{session_id}`).
+- таймаут и fallback-режим при недоступности LLM-провайдера.
+
+### Опциональное хранение результатов в PostGIS
+
+```bash
+export ENABLE_DB_PERSISTENCE=1
+export POSTGRES_DSN="postgresql+psycopg2://user:password@localhost:5432/geophysics"
+```
+
+После включения persistence:
+- каждый запуск сохраняется в таблицы `pipeline_runs` и `anomaly_records`;
+- при старте автоматически выполняется попытка включения расширений `postgis`, `pointcloud`, `pointcloud_postgis`;
+- доступны API:
+  - `GET /api/db/runs?limit=20`
+  - `GET /api/db/runs/{run_uid}`
 
 #### API запуск (пример)
 
