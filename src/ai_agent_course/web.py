@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import shutil
+import threading
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -22,6 +24,8 @@ load_local_env(PROJECT_ROOT / ".env.local")
 CACHE_ROOT = (PROJECT_ROOT / ".cache" / "agent_v2").resolve()
 RUNS_DIR = CACHE_ROOT / "runs"
 UPLOADS_DIR = CACHE_ROOT / "uploads"
+HISTORY_PATH = CACHE_ROOT / "history.json"
+_history_lock = threading.Lock()
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -34,6 +38,51 @@ app = FastAPI(
 )
 app.mount("/agent-v2-output", StaticFiles(directory=str(RUNS_DIR)), name="agent-v2-output")
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "templates"))
+
+
+def _read_history() -> list[dict[str, Any]]:
+    if not HISTORY_PATH.exists():
+        return []
+    try:
+        import json
+
+        payload = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            return payload
+    except Exception:  # noqa: BLE001
+        logger.exception("Не удалось прочитать историю запусков V2")
+    return []
+
+
+def _write_history(items: list[dict[str, Any]]) -> None:
+    import json
+
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY_PATH.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _append_history(result_payload: dict[str, Any]) -> None:
+    record = {
+        "run_id": result_payload.get("run_id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "mode": result_payload.get("mode"),
+        "anomalies_count": len(result_payload.get("anomalies", [])),
+        "critical_count": result_payload.get("metrics", {}).get("critical_count", 0),
+        "high_count": result_payload.get("metrics", {}).get("high_count", 0),
+        "low_count": result_payload.get("metrics", {}).get("low_count", 0),
+    }
+    with _history_lock:
+        items = _read_history()
+        items.insert(0, record)
+        _write_history(items[:200])
+
+
+def _history_slice(limit: int = 10) -> list[dict[str, Any]]:
+    with _history_lock:
+        return _read_history()[:limit]
 
 
 def _save_upload(upload: UploadFile, target_dir: Path, prefix: str) -> Path:
@@ -80,6 +129,7 @@ def _run_analysis(
     artifacts["miis_xml_url"] = _artifact_url(Path(artifacts["miis_xml_path"]))
     artifacts["pdf_report_url"] = _artifact_url(Path(artifacts["pdf_report_path"]))
     payload["run_id"] = run_id
+    _append_history(payload)
     return payload
 
 
@@ -104,7 +154,12 @@ def healthz() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
-    context = {"form": _default_form(), "result": None, "error": None}
+    context = {
+        "form": _default_form(),
+        "result": None,
+        "error": None,
+        "recent_runs": _history_slice(limit=10),
+    }
     return templates.TemplateResponse(request, "agent_v2/index.html", context)
 
 
@@ -140,11 +195,21 @@ def analyze_from_form(
             llm_model=llm_model.strip() or None,
             llm_base_url=llm_base_url.strip() or None,
         )
-        context = {"form": form_data, "result": result, "error": None}
+        context = {
+            "form": form_data,
+            "result": result,
+            "error": None,
+            "recent_runs": _history_slice(limit=10),
+        }
         return templates.TemplateResponse(request, "agent_v2/index.html", context)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ошибка анализа в V2 форме")
-        context = {"form": form_data, "result": None, "error": str(exc)}
+        context = {
+            "form": form_data,
+            "result": None,
+            "error": str(exc),
+            "recent_runs": _history_slice(limit=10),
+        }
         return templates.TemplateResponse(
             request,
             "agent_v2/index.html",
@@ -181,4 +246,10 @@ def analyze_api(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ошибка анализа в V2 API")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/runs")
+def list_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+    items = _history_slice(limit=limit)
+    return {"items": items, "count": len(items)}
 

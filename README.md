@@ -47,6 +47,7 @@ python web_app.py
 - `http://localhost:8000`
 - `http://localhost:8000/docs`
 - `http://localhost:8000/healthz`
+- `http://localhost:8000/api/runs` (история последних запусков V2)
 
 ### Как работает LLM без ключа
 
@@ -81,6 +82,8 @@ export LLM_MODEL="gpt-4o-mini"
 1. Скопируй шаблон:
 ```bash
 cp .env.local.example .env.local
+# Windows PowerShell:
+# copy .env.local.example .env.local
 ```
 2. Заполни в `.env.local` свой ключ и параметры провайдера.
 3. Запускай `python web_app.py` или `python main.py ...` — ключ подхватится автоматически.

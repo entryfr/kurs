@@ -90,6 +90,21 @@
         <pre>{{ result.anomalies[:5] | tojson(indent=2) }}</pre>
     </div>
     {% endif %}
+
+    {% if recent_runs %}
+    <div class="card">
+        <h2>Последние запуски</h2>
+        <ul>
+            {% for run in recent_runs %}
+            <li>
+                <strong>{{ run.run_id }}</strong> · {{ run.created_at }} · mode={{ run.mode }} ·
+                anomalies={{ run.anomalies_count }} ·
+                C/H/L={{ run.critical_count }}/{{ run.high_count }}/{{ run.low_count }}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
 </div>
 </body>
 </html>

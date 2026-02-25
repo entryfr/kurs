@@ -75,3 +75,25 @@ def test_v2_api_analyze(monkeypatch) -> None:
     payload = response.json()
     assert payload["mode"] == "fallback_no_api_key"
     assert payload["metrics"]["critical_count"] == 1
+
+
+def test_v2_api_runs(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.ai_agent_course.web._history_slice",
+        lambda limit=20: [
+            {
+                "run_id": "run-42",
+                "created_at": "2026-02-19T10:00:00+00:00",
+                "mode": "llm_openai_compatible",
+                "anomalies_count": 3,
+                "critical_count": 1,
+                "high_count": 1,
+                "low_count": 1,
+            }
+        ],
+    )
+    response = client.get("/api/runs?limit=5")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["run_id"] == "run-42"
