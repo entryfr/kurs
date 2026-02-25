@@ -14,7 +14,8 @@ def test_ask_agent_fallback_when_no_api_key(monkeypatch) -> None:
     monkeypatch.setattr(chat_agent, "_cached_agent", None)
 
     result = chat_agent.ask_agent("Как запустить проект?")
-    assert result["mode"] == "fallback"
+    assert result["mode"] == "fallback_no_api_key"
+    assert "ANTHROPIC_API_KEY" in result["answer"]
     assert "запуск" in result["answer"].lower() or "python web_app.py" in result["answer"]
 
 
@@ -46,3 +47,13 @@ def test_ask_agent_timeout_switches_to_fallback(monkeypatch) -> None:
 
     result = chat_agent.ask_agent("Проверь таймаут")
     assert result["mode"] == "fallback_timeout"
+    assert "таймаут" in result["answer"].lower()
+
+
+def test_ask_agent_unknown_question_requests_clarification(monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(chat_agent, "_cached_agent", None)
+
+    result = chat_agent.ask_agent("Расскажи что-нибудь")
+    assert result["mode"] == "fallback_no_api_key"
+    assert "уточнение" in result["answer"].lower() or "пример" in result["answer"].lower()
