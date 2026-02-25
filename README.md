@@ -3,6 +3,20 @@
 Прототип Python-пайплайна для анализа геофизических данных и оценки рисков
 повреждения подземных инженерных коммуникаций.
 
+## Новый контур V2 (с нуля под курсовой)
+
+V2 реализует сценарий: **«загрузить картинку + написать запрос»**.
+
+- Вход: изображение аэрогеофизики + текст по ТЗ (+ опционально MIIS XML).
+- Оркестратор выполняет 6 шагов:
+  1. трансформация координат;
+  2. детекция аномалий + буферный анализ;
+  3. классификация типа коммуникации;
+  4. расчёт риска `R = P(comm) × P(damage|depth) × W`;
+  5. прогноз остаточного ресурса;
+  6. генерация артефактов.
+- Выход: `DXF`, `MIIS XML`, `PDF` + структурированный JSON.
+
 ## Что делает проект
 
 1. Загружает входные данные:
@@ -31,6 +45,10 @@
 
 ## Структура проекта
 
+- `main_v2.py` — CLI для нового контура V2 (картинка + prompt).
+- `web_app_v2.py` — отдельный запуск V2 web.
+- `src/ai_agent_course` — новая реализация агента с нуля под ТЗ.
+- `templates/agent_v2` — HTML интерфейс V2.
 - `main.py` — CLI запуск демо-пайплайна.
 - `src/pipeline` — сервисный слой запуска (`run_pipeline`), общий для CLI и web.
 - `src/web` — FastAPI веб-интерфейс.
@@ -85,7 +103,7 @@ python main.py \
 ### Запуск через веб-интерфейс
 
 ```bash
-uvicorn src.web.app:app --host 0.0.0.0 --port 8000
+uvicorn src.ai_agent_course.web:app --host 0.0.0.0 --port 8000
 ```
 
 или
@@ -95,10 +113,20 @@ python web_app.py
 ```
 
 После старта откройте:
-- `http://localhost:8000` — HTML-форма запуска пайплайна;
-- `http://localhost:8000/chat` — чат с агентом;
-- `http://localhost:8000/docs` — Swagger UI для API;
+- `http://localhost:8000` — V2 форма «картинка + запрос»;
+- `http://localhost:8000/docs` — Swagger UI V2 (`/api/analyze`);
 - `http://localhost:8000/healthz` — health-check.
+
+Пример API V2 (multipart):
+
+```bash
+curl -X POST "http://localhost:8000/api/analyze" \
+  -F "prompt=Проанализируй участок строительства ЖК Нагатинский..." \
+  -F "image_file=@data/raw/example.png" \
+  -F "miis_xml_file=@data/raw/input.miis.xml"
+```
+
+> Legacy-контур (`src.web.app`) сохранён для обратной совместимости и старых тестов.
 
 В web-форме доступны:
 - синхронный запуск;
@@ -191,6 +219,7 @@ pytest tests/test_corrosion_pipeline.py -v
 pytest tests/test_linear_threshold.py -v
 pytest tests/test_act_generator.py -v
 pytest tests/test_mins_exporter.py -v
+pytest tests/test_agent_v2_web.py -v
 ```
 
 ## Текущий статус
