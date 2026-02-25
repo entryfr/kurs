@@ -1,4 +1,5 @@
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import Point, Polygon
 
 from src.pipeline.service import _classify_risk_tz, _compute_zone_flags
@@ -10,7 +11,7 @@ def test_classify_risk_tz_critical_when_no_utility_in_construction_zone() -> Non
         geometry="geometry",
         crs="EPSG:32637",
     )
-    row = gpd.GeoSeries(
+    row = pd.Series(
         {
             "depth": 1.2,
             "utilities_in_buffer": [],
@@ -35,7 +36,7 @@ def test_classify_risk_tz_high_on_depth_mismatch() -> None:
         geometry="geometry",
         crs="EPSG:32637",
     )
-    row = gpd.GeoSeries(
+    row = pd.Series(
         {
             "depth": 2.0,
             "utilities_in_buffer": [0],
@@ -60,7 +61,7 @@ def test_classify_risk_tz_low_on_depth_match() -> None:
         geometry="geometry",
         crs="EPSG:32637",
     )
-    row = gpd.GeoSeries(
+    row = pd.Series(
         {
             "depth": 1.2,
             "utilities_in_buffer": [0],
@@ -85,7 +86,7 @@ def test_classify_risk_tz_fallback_to_model() -> None:
         geometry="geometry",
         crs="EPSG:32637",
     )
-    row = gpd.GeoSeries(
+    row = pd.Series(
         {
             "depth": None,
             "utilities_in_buffer": [0],
