@@ -33,6 +33,7 @@ from src.reporting.act_generator import generate_act
 from src.reporting.dxf_exporter import export_to_dxf
 from src.reporting.miis_exporter import create_miis_xml
 from src.reporting.mins_exporter import create_mins_xml
+from src.storage.repository import persist_pipeline_run
 
 logger = logging.getLogger(__name__)
 
@@ -693,7 +694,7 @@ def run_pipeline(
         if isinstance(warning, str) and warning.strip()
     ]
 
-    return {
+    result: dict[str, Any] = {
         "input_mode": input_mode,
         "norms_profile": norms_profile,
         "detected_count": len(detected),
@@ -716,3 +717,8 @@ def run_pipeline(
         "act_path": act_result["docx_path"],
         "act_pdf_path": act_result["pdf_path"],
     }
+
+    persistence = persist_pipeline_run(result, result_gdf)
+    result["db_persistence"] = persistence
+    result["db_run_uid"] = persistence.get("run_uid")
+    return result

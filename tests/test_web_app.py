@@ -32,6 +32,8 @@ def _fake_summary() -> dict:
         "mins_path": "output/mins_exchange.xml",
         "act_path": "output/act.docx",
         "act_pdf_path": None,
+        "db_persistence": {"enabled": False, "status": "skipped"},
+        "db_run_uid": None,
     }
 
 
@@ -227,3 +229,45 @@ def test_chat_form_post(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert "Ответ из формы" in response.text
+
+
+def test_list_db_runs_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.storage.repository.list_persisted_runs",
+        lambda limit=20: [
+            {
+                "run_uid": "run-1",
+                "created_at": "2026-02-19T10:00:00+00:00",
+                "norms_profile": "normative",
+                "input_mode": "vector_layers",
+                "anomalies_count": 2,
+                "validation_issues": 0,
+            }
+        ],
+    )
+    response = client.get("/api/db/runs?limit=10")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["run_uid"] == "run-1"
+
+
+def test_get_db_run_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.storage.repository.get_persisted_run",
+        lambda run_uid: {
+            "run_uid": run_uid,
+            "anomalies": [{"anomaly_index": 0, "risk_class": "CRITICAL"}],
+        },
+    )
+    response = client.get("/api/db/runs/run-xyz")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_uid"] == "run-xyz"
+    assert payload["anomalies"][0]["risk_class"] == "CRITICAL"
+
+
+def test_get_db_run_endpoint_404(monkeypatch) -> None:
+    monkeypatch.setattr("src.storage.repository.get_persisted_run", lambda run_uid: None)
+    response = client.get("/api/db/runs/not-found")
+    assert response.status_code == 404

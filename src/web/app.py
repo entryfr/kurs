@@ -113,6 +113,8 @@ def _prepare_summary(summary: dict[str, Any]) -> dict[str, Any]:
     enriched["act_url"] = _artifact_url(summary["act_path"])
     act_pdf_path = summary.get("act_pdf_path")
     enriched["act_pdf_url"] = _artifact_url(act_pdf_path) if act_pdf_path else None
+    db_run_uid = summary.get("db_run_uid")
+    enriched["db_run_url"] = f"/api/db/runs/{db_run_uid}" if db_run_uid else None
     return enriched
 
 
@@ -476,6 +478,24 @@ def get_chat_session(session_id: str) -> dict[str, Any]:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Chat session {session_id} not found")
     return session
+
+
+@app.get("/api/db/runs")
+def list_db_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+    from src.storage.repository import list_persisted_runs
+
+    items = list_persisted_runs(limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/db/runs/{run_uid}")
+def get_db_run(run_uid: str) -> dict[str, Any]:
+    from src.storage.repository import get_persisted_run
+
+    item = get_persisted_run(run_uid)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_uid} not found in DB")
+    return item
 
 
 @app.post("/api/run/async")

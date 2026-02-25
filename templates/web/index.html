@@ -210,6 +210,14 @@
                 <strong>Отфильтр. коротких линий:</strong><br>
                 {{ summary.linear_anomalies_filtered_count }}
             </div>
+            <div class="metric">
+                <strong>Хранение в БД:</strong><br>
+                {% if summary.db_run_uid %}
+                    <a href="{{ summary.db_run_url }}" target="_blank">{{ summary.db_run_uid }}</a>
+                {% else %}
+                    {{ summary.db_persistence.status if summary.db_persistence else "отключено" }}
+                {% endif %}
+            </div>
         </div>
 
         <h2>Артефакты</h2>

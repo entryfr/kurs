@@ -4,6 +4,8 @@
 # подземных инженерных коммуникаций
 # ─────────────────────────────────────────────────────────────────────────────
 
+import os
+
 # ── Геопространственные системы координат ────────────────────────────────────
 CRS_INPUT   = "EPSG:4936"   # ПЗ-90.11 (геоцентрические, используется с pyproj)
 CRS_LOCAL   = "EPSG:28406"  # СК-42 / Гаусс-Крюгер зона 6 (МСК-50 / Москва)
@@ -90,3 +92,16 @@ DXF_OUTPUT_PATH  = "output/scheme.dxf"
 MIIS_OUTPUT_PATH = "output/miis_output.xml"
 ACT_OUTPUT_PATH  = "output/act.docx"
 ACT_TEMPLATE     = "templates/act_template.jinja2"
+
+# ── Настройки хранения результатов в PostGIS ────────────────────────────────
+# Например:
+# POSTGRES_DSN=postgresql+psycopg2://user:password@localhost:5432/geophysics
+POSTGRES_DSN = os.getenv("POSTGRES_DSN", "").strip()
+ENABLE_DB_PERSISTENCE = os.getenv("ENABLE_DB_PERSISTENCE", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))

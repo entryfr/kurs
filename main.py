@@ -87,6 +87,10 @@ def main() -> None:
     print(f"  - {summary['act_path']}")
     if summary.get("act_pdf_path"):
         print(f"  - {summary['act_pdf_path']}")
+    if summary.get("db_run_uid"):
+        print(f"  - DB run: {summary['db_run_uid']}")
+    elif summary.get("db_persistence"):
+        print(f"  - DB persistence: {summary['db_persistence'].get('status')}")
     print(f"  - Режим входа: {summary['input_mode']}")
     print(f"  - Профиль норм: {summary['norms_profile']}")
 
