@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent V2 — Подземные коммуникации</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; background: #f4f6fb; color: #111827; }
+        .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        label { font-weight: 600; display: block; margin-bottom: 6px; }
+        textarea, input[type="file"] { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+        textarea { min-height: 140px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; }
+        button { background: #2563eb; color: #fff; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+        button:hover { background: #1d4ed8; }
+        .error { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; border-radius: 8px; padding: 10px; }
+        .metric { padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; }
+        pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; overflow: auto; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1>Новый AI-агент (с нуля) — анализ картинки + запроса</h1>
+        <p>Загрузите изображение аэрогеофизической карты и текст по ТЗ. Агент выполнит 6 шагов и вернёт артефакты.</p>
+        <form action="/analyze" method="post" enctype="multipart/form-data">
+            <label for="prompt">Текстовый запрос</label>
+            <textarea id="prompt" name="prompt" required>{{ form.prompt }}</textarea>
+
+            <label for="image_file">Картинка (обязательно)</label>
+            <input id="image_file" name="image_file" type="file" accept="image/*" required>
+
+            <label for="miis_xml_file">MIIS XML (опционально)</label>
+            <input id="miis_xml_file" name="miis_xml_file" type="file" accept=".xml">
+
+            <button type="submit">Запустить анализ</button>
+        </form>
+    </div>
+
+    {% if error %}
+    <div class="card error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+    <div class="card">
+        <h2>Ответ агента</h2>
+        <p><strong>mode:</strong> {{ result.mode }}</p>
+        <p>{{ result.answer }}</p>
+    </div>
+
+    <div class="card grid">
+        <div class="metric"><strong>Аномалий:</strong><br>{{ result.anomalies|length }}</div>
+        <div class="metric"><strong>СКО трансформации:</strong><br>{{ result.metrics.rms_error_m }}</div>
+        <div class="metric"><strong>CRITICAL:</strong><br>{{ result.metrics.critical_count }}</div>
+        <div class="metric"><strong>HIGH:</strong><br>{{ result.metrics.high_count }}</div>
+        <div class="metric"><strong>LOW:</strong><br>{{ result.metrics.low_count }}</div>
+        <div class="metric"><strong>Нарушений R01..R12:</strong><br>{{ result.metrics.validation_issues_count }}</div>
+    </div>
+
+    <div class="card">
+        <h2>Артефакты</h2>
+        <ul>
+            <li><a href="{{ result.artifacts.dxf_url }}" target="_blank">DXF схема</a></li>
+            <li><a href="{{ result.artifacts.miis_xml_url }}" target="_blank">MIIS XML</a></li>
+            <li><a href="{{ result.artifacts.pdf_report_url }}" target="_blank">PDF акт</a></li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Первые аномалии (JSON)</h2>
+        <pre>{{ result.anomalies[:5] | tojson(indent=2) }}</pre>
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>
+
