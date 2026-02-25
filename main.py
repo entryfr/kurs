@@ -82,6 +82,8 @@ def main() -> None:
     print("Готово. Выходные файлы:")
     print(f"  - {summary['dxf_path']}")
     print(f"  - {summary['xml_path']}")
+    if summary.get("mins_path"):
+        print(f"  - {summary['mins_path']}")
     print(f"  - {summary['act_path']}")
     if summary.get("act_pdf_path"):
         print(f"  - {summary['act_pdf_path']}")

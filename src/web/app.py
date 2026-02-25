@@ -108,6 +108,8 @@ def _prepare_summary(summary: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(summary)
     enriched["dxf_url"] = _artifact_url(summary["dxf_path"])
     enriched["xml_url"] = _artifact_url(summary["xml_path"])
+    mins_path = summary.get("mins_path")
+    enriched["mins_url"] = _artifact_url(mins_path) if mins_path else None
     enriched["act_url"] = _artifact_url(summary["act_path"])
     act_pdf_path = summary.get("act_pdf_path")
     enriched["act_pdf_url"] = _artifact_url(act_pdf_path) if act_pdf_path else None

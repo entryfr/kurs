@@ -32,6 +32,7 @@ from src.preprocessing.segy_reader import extract_segy_features
 from src.reporting.act_generator import generate_act
 from src.reporting.dxf_exporter import export_to_dxf
 from src.reporting.miis_exporter import create_miis_xml
+from src.reporting.mins_exporter import create_mins_xml
 
 logger = logging.getLogger(__name__)
 
@@ -632,6 +633,14 @@ def run_pipeline(
     result_gdf["corrosion_critical"] = corrosion_data.apply(lambda x: x.get("corrosion_critical", False))
     result_gdf["corrosion_warning"] = corrosion_data.apply(lambda x: x.get("corrosion_warning"))
     result_gdf["corrosion_utility_type"] = corrosion_data.apply(lambda x: x.get("corrosion_utility_type"))
+    result_gdf["recommendation"] = result_gdf.apply(
+        lambda row: _recommendation_by_tz(
+            str(row.get("risk_class", "LOW")),
+            str(row.get("utility_type", "unknown")),
+            _depth_value(row.get("depth")),
+        ),
+        axis=1,
+    )
 
     logger.info("Нормативная валидация...")
     validation_errors = validate_anomalies(
@@ -651,12 +660,19 @@ def run_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
     dxf_path = output_dir / "scheme.dxf"
     xml_path = output_dir / "miis.xml"
+    mins_path = output_dir / "mins_exchange.xml"
     act_path = output_dir / "act.docx"
     act_pdf_path = output_dir / "act.pdf"
 
     logger.info("Экспорт результатов...")
     export_to_dxf(result_gdf, utilities_gdf, blind_zones_gdf, str(dxf_path))
     create_miis_xml(result_gdf, utilities_gdf, str(xml_path))
+    create_mins_xml(
+        anomalies_gdf=result_gdf,
+        utilities_gdf=utilities_gdf,
+        output_path=str(mins_path),
+        profile=norms_profile,
+    )
     act_result = generate_act(
         data={
             "date": date.today().isoformat(),
@@ -696,6 +712,7 @@ def run_pipeline(
         "linear_anomaly_min_length_m": 10.0,
         "dxf_path": str(dxf_path),
         "xml_path": str(xml_path),
+        "mins_path": str(mins_path),
         "act_path": act_result["docx_path"],
         "act_pdf_path": act_result["pdf_path"],
     }

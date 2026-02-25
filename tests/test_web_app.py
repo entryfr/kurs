@@ -29,6 +29,7 @@ def _fake_summary() -> dict:
         "linear_anomaly_min_length_m": 10.0,
         "dxf_path": "output/scheme.dxf",
         "xml_path": "output/miis.xml",
+        "mins_path": "output/mins_exchange.xml",
         "act_path": "output/act.docx",
         "act_pdf_path": None,
     }

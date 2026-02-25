@@ -230,6 +230,16 @@
                     {{ summary.xml_path }}
                 {% endif %}
             </li>
+            {% if summary.mins_path %}
+            <li>
+                MINS XML:
+                {% if summary.mins_url %}
+                    <a href="{{ summary.mins_url }}" target="_blank">{{ summary.mins_path }}</a>
+                {% else %}
+                    {{ summary.mins_path }}
+                {% endif %}
+            </li>
+            {% endif %}
             <li>
                 DOCX:
                 {% if summary.act_url %}
