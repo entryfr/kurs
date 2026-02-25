@@ -18,6 +18,7 @@ from src.agent.validator import (
 )
 from src.classification.risk_classifier import RiskClassifier
 from src.classification.utility_type_identifier import UtilityTypeIdentifier
+from src.classification.corrosion_estimator import assess_corrosion
 from src.detection.anomaly_detector import detect_linear_anomalies
 from src.detection.blind_zones import find_blind_zones
 from src.detection.buffer_analysis import check_utilities_in_buffer
@@ -51,6 +52,7 @@ DEFAULT_IDENTIFIER_FEATURES: dict[str, float | int] = {
     "age_infrastructure": 20.0,
     "soil_moisture": 0.3,
 }
+METALLIC_UTILITY_TYPES = {"gas", "water", "heating", "sewage", "unknown_pipeline"}
 
 
 def _safe_float(value: Any, default: float) -> float:
@@ -289,6 +291,89 @@ def _classify_risk_tz(
     return (model_risk_class, model_probability, "MODEL_FALLBACK", None)
 
 
+def _assess_corrosion_for_row(
+    row: gpd.GeoSeries,
+    utilities_gdf: gpd.GeoDataFrame,
+) -> dict[str, Any]:
+    utility_indexes = row.get("utilities_in_buffer", [])
+    if not isinstance(utility_indexes, list) or not utility_indexes:
+        return {
+            "corrosion_rate": None,
+            "remaining_life": None,
+            "corrosion_critical": False,
+            "corrosion_warning": None,
+            "corrosion_utility_type": None,
+        }
+
+    candidates: list[dict[str, Any]] = []
+    for utility_idx in utility_indexes:
+        if utility_idx not in utilities_gdf.index:
+            continue
+        utility = utilities_gdf.loc[utility_idx]
+        utility_type = str(utility.get("type", "unknown"))
+        if utility_type not in METALLIC_UTILITY_TYPES:
+            continue
+
+        initial_diameter = _safe_float(utility.get("diameter"), 200.0)
+        if initial_diameter <= 0:
+            initial_diameter = 200.0
+
+        corrosion_data = assess_corrosion(
+            {
+                "soil_rho": max(_safe_float(row.get("rho_value"), 100.0), 1e-3),
+                "moisture": float(np.clip(_safe_float(row.get("soil_moisture"), 0.3), 0.0, 1.0)),
+                "ph": _safe_float(row.get("ph"), 7.0),
+                "initial_diameter": initial_diameter,
+                "age": max(
+                    _safe_float(
+                        utility.get("age_infrastructure"),
+                        _safe_float(row.get("age_infrastructure"), 20.0),
+                    ),
+                    0.0,
+                ),
+            }
+        )
+        remaining_life = corrosion_data.get("remaining_life")
+        if isinstance(remaining_life, (int, float)) and np.isinf(remaining_life):
+            remaining_life = None
+
+        candidates.append(
+            {
+                "corrosion_rate": corrosion_data.get("corrosion_rate"),
+                "remaining_life": remaining_life,
+                "corrosion_critical": bool(corrosion_data.get("critical", False)),
+                "corrosion_utility_type": utility_type,
+            }
+        )
+
+    if not candidates:
+        return {
+            "corrosion_rate": None,
+            "remaining_life": None,
+            "corrosion_critical": False,
+            "corrosion_warning": None,
+            "corrosion_utility_type": None,
+        }
+
+    # Берём худший сценарий по минимальному остаточному ресурсу.
+    def _sort_key(item: dict[str, Any]) -> float:
+        life = item.get("remaining_life")
+        return life if life is not None else 10_000.0
+
+    selected = sorted(candidates, key=_sort_key)[0]
+    warning = None
+    if selected["corrosion_critical"]:
+        warning = (
+            "Требуется срочная замена во избежание аварии "
+            f"(T_ост={selected['remaining_life']:.2f} лет)."
+            if selected["remaining_life"] is not None
+            else "Требуется срочная замена во избежание аварии (T_ост < 5 лет)."
+        )
+
+    selected["corrosion_warning"] = warning
+    return selected
+
+
 def _build_risk_explanations(
     result_gdf: gpd.GeoDataFrame, issue_map: dict[int, list[str]] | None = None
 ) -> list[dict[str, Any]]:
@@ -308,6 +393,8 @@ def _build_risk_explanations(
             reasons.append("В буфере нет подтверждённой коммуникации.")
         if bool(row.get("in_blind_zone", False)):
             reasons.append("Аномалия попадает в слепую зону геофизики.")
+        if bool(row.get("corrosion_critical", False)):
+            reasons.append("Обнаружен критический прогноз остаточного ресурса коммуникации.")
 
         explanations.append(
             {
@@ -438,6 +525,17 @@ def run_pipeline(
     result_gdf["risk_rule"] = tz_results.apply(lambda x: x[2])
     result_gdf["depth_mismatch_m"] = tz_results.apply(lambda x: x[3])
 
+    logger.info("Оценка коррозионного ресурса...")
+    corrosion_data = result_gdf.apply(
+        lambda row: _assess_corrosion_for_row(row, utilities_gdf),
+        axis=1,
+    )
+    result_gdf["corrosion_rate"] = corrosion_data.apply(lambda x: x.get("corrosion_rate"))
+    result_gdf["remaining_life"] = corrosion_data.apply(lambda x: x.get("remaining_life"))
+    result_gdf["corrosion_critical"] = corrosion_data.apply(lambda x: x.get("corrosion_critical", False))
+    result_gdf["corrosion_warning"] = corrosion_data.apply(lambda x: x.get("corrosion_warning"))
+    result_gdf["corrosion_utility_type"] = corrosion_data.apply(lambda x: x.get("corrosion_utility_type"))
+
     logger.info("Нормативная валидация...")
     validation_errors = validate_anomalies(
         result_gdf,
@@ -473,6 +571,11 @@ def run_pipeline(
 
     issue_map = _build_anomaly_issue_map(all_issues)
     risk_details = _build_risk_explanations(result_gdf, issue_map)
+    corrosion_warnings = [
+        f"Аномалия #{idx}: {warning}"
+        for idx, warning in result_gdf["corrosion_warning"].items()
+        if isinstance(warning, str) and warning.strip()
+    ]
 
     return {
         "input_mode": input_mode,
@@ -487,6 +590,8 @@ def run_pipeline(
         "segy_features": segy_features,
         "blind_zones_count": len(blind_zones_gdf),
         "blind_zone_anomalies_count": int(result_gdf["in_blind_zone"].sum()),
+        "corrosion_critical_count": int(result_gdf["corrosion_critical"].sum()),
+        "corrosion_warnings": corrosion_warnings,
         "dxf_path": str(dxf_path),
         "xml_path": str(xml_path),
         "act_path": str(act_path),

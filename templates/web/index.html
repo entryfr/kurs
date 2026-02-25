@@ -202,6 +202,10 @@
                 <strong>Аномалий в слепых зонах:</strong><br>
                 {{ summary.blind_zone_anomalies_count }}
             </div>
+            <div class="metric">
+                <strong>Критичных по ресурсу:</strong><br>
+                {{ summary.corrosion_critical_count }}
+            </div>
         </div>
 
         <h2>Артефакты</h2>
@@ -251,6 +255,15 @@
                     confidence={{ item.confidence }},
                     тип={{ item.utility_type }}
                 </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if summary.corrosion_warnings %}
+        <h2>Предупреждения по остаточному ресурсу</h2>
+        <ul>
+            {% for warning in summary.corrosion_warnings %}
+                <li>{{ warning }}</li>
             {% endfor %}
         </ul>
         {% endif %}
