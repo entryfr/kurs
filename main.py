@@ -14,6 +14,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt", required=True, help="Инженерный запрос для агента")
     parser.add_argument("--miis-xml", default=None, help="Опциональный MIIS XML с учтёнными коммуникациями")
     parser.add_argument("--output-dir", default="output_v2", help="Каталог для результатов")
+    parser.add_argument("--llm-provider", default="auto", choices=["auto", "anthropic", "openai_compatible"], help="Провайдер LLM")
+    parser.add_argument("--llm-api-key", default=None, help="API ключ LLM (опционально)")
+    parser.add_argument("--llm-model", default=None, help="Имя модели LLM (опционально)")
+    parser.add_argument("--llm-base-url", default=None, help="Base URL для openai_compatible")
     return parser
 
 
@@ -25,6 +29,10 @@ def main() -> None:
         prompt=args.prompt,
         output_dir=Path(args.output_dir),
         miis_xml_path=Path(args.miis_xml) if args.miis_xml else None,
+        llm_provider=args.llm_provider,
+        llm_api_key=args.llm_api_key,
+        llm_model=args.llm_model,
+        llm_base_url=args.llm_base_url,
     )
 
     print("=== AI Agent V2 ===")

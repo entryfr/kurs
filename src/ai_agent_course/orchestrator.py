@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -13,6 +12,10 @@ import numpy as np
 from shapely.geometry import LineString, Polygon
 
 from src.ai_agent_course.schemas import AgentRunResult, ArtifactPaths, PromptContext
+from src.ai_agent_course.llm_client import (
+    build_engineering_answer,
+    resolve_llm_config,
+)
 from src.ai_agent_course.tools.anomaly_detector import detect_linear_anomalies_from_image
 from src.ai_agent_course.tools.coordinate_transformer import (
     fit_affine_transform,
@@ -148,35 +151,6 @@ def _recommendation(risk_index: float, depth_m: float, utility_type: str) -> str
     return "Инженерное уточнение трассы"
 
 
-def _build_llm_answer(prompt: str, anomalies: list[dict[str, Any]], validation: dict[str, Any]) -> tuple[str, str]:
-    key = os.getenv("ANTHROPIC_API_KEY")
-    if not key:
-        return "", "fallback_no_api_key"
-    try:
-        from langchain_anthropic import ChatAnthropic
-
-        llm = ChatAnthropic(
-            model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest"),
-            timeout=20,
-            max_tokens=900,
-            temperature=0.1,
-        )
-        compact = anomalies[:8]
-        prompt_text = (
-            "Ты инженер-изыскатель. Дай краткий вывод по результатам автоматического анализа.\n"
-            f"Запрос: {prompt}\n"
-            f"Аномалии: {compact}\n"
-            f"Нарушения: {validation.get('issues_by_rule', {})}\n"
-            "Сформируй итог на русском: риски, рекомендации, что делать на площадке."
-        )
-        response = llm.invoke(prompt_text)
-        answer = str(getattr(response, "content", response)).strip()
-        return answer, "llm"
-    except Exception:  # noqa: BLE001
-        logger.exception("LLM недоступен, переключаемся на детерминированный ответ")
-        return "", "fallback_after_error"
-
-
 def _fallback_answer(anomalies: list[dict[str, Any]], validation: dict[str, Any], context: PromptContext) -> str:
     critical = sum(1 for item in anomalies if item["risk_class"] == "CRITICAL")
     high = sum(1 for item in anomalies if item["risk_class"] == "HIGH")
@@ -200,6 +174,10 @@ class EngineeringSurveyAgent:
         prompt: str,
         output_dir: Path,
         miis_xml_path: Path | None = None,
+        llm_provider: str | None = None,
+        llm_api_key: str | None = None,
+        llm_model: str | None = None,
+        llm_base_url: str | None = None,
     ) -> AgentRunResult:
         output_dir.mkdir(parents=True, exist_ok=True)
         context = _parse_prompt_context(prompt)
@@ -362,9 +340,16 @@ class EngineeringSurveyAgent:
         export_miis_xml(anomaly_outputs, xml_path, crs=str(anomalies_gdf.crs))
         generate_pdf_act(context.site_name, anomaly_outputs, validation["issues"], pdf_path)
 
-        answer, mode = _build_llm_answer(prompt, anomaly_outputs, validation)
+        llm_config = resolve_llm_config(
+            provider=llm_provider,
+            api_key=llm_api_key,
+            model=llm_model,
+            base_url=llm_base_url,
+        )
+        answer, mode = build_engineering_answer(prompt, anomaly_outputs, validation, llm_config)
         if not answer:
             answer = _fallback_answer(anomaly_outputs, validation, context)
+            mode = f"{mode}_with_deterministic_answer"
 
         metrics = {
             "rms_error_m": transform_result.rms_error_m,
@@ -373,6 +358,8 @@ class EngineeringSurveyAgent:
             "low_count": sum(1 for item in anomaly_outputs if item["risk_class"] == "LOW"),
             "blind_zone_count": sum(1 for item in anomaly_outputs if item["in_blind_zone"]),
             "validation_issues_count": validation["issues_count"],
+            "llm_provider": llm_config.provider,
+            "llm_model": llm_config.model,
         }
 
         artifacts = ArtifactPaths(

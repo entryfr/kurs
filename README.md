@@ -48,6 +48,34 @@ python web_app.py
 - `http://localhost:8000/docs`
 - `http://localhost:8000/healthz`
 
+### Как работает LLM без ключа
+
+Если ключ не задан, агент всё равно работает в **детерминированном fallback-режиме**:
+- выполняет pipeline и расчёты;
+- генерирует артефакты;
+- текстовый ответ формирует без внешнего LLM.
+
+### Как включить LLM с ключом
+
+Поддерживаются 2 варианта:
+
+1) **Anthropic**
+```bash
+export ANTHROPIC_API_KEY="..."
+export LLM_PROVIDER="anthropic"
+export ANTHROPIC_MODEL="claude-3-5-sonnet-latest"
+```
+
+2) **OpenAI-compatible endpoint** (в т.ч. кастомные прокси)
+```bash
+export LLM_PROVIDER="openai_compatible"
+export LLM_API_KEY="..."
+export LLM_BASE_URL="https://your-endpoint.example/v1"
+export LLM_MODEL="gpt-4o-mini"
+```
+
+В веб-форме можно передать ключ/провайдер прямо в запросе (ключ не сохраняется в файлы проекта).
+
 ## Запуск (CLI)
 
 ```bash
@@ -55,7 +83,11 @@ python main.py \
   --image data/raw/example.png \
   --prompt "Проанализируй участок строительства ЖК Нагатинский..." \
   --miis-xml data/raw/input.miis.xml \
-  --output-dir output_v2
+  --output-dir output_v2 \
+  --llm-provider openai_compatible \
+  --llm-api-key "..." \
+  --llm-base-url "https://your-endpoint.example/v1" \
+  --llm-model "gpt-4o-mini"
 ```
 
 ## Пример API
@@ -71,4 +103,5 @@ curl -X POST "http://localhost:8000/api/analyze" \
 
 ```bash
 pytest tests/test_agent_v2_web.py -v
+pytest tests/test_llm_client.py -v
 ```
