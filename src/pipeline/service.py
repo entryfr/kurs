@@ -19,6 +19,7 @@ from src.agent.validator import (
 from src.classification.risk_classifier import RiskClassifier
 from src.classification.utility_type_identifier import UtilityTypeIdentifier
 from src.detection.anomaly_detector import detect_linear_anomalies
+from src.detection.blind_zones import find_blind_zones
 from src.detection.buffer_analysis import check_utilities_in_buffer
 from src.preprocessing.input_loader import (
     load_anomalies_and_utilities,
@@ -221,6 +222,31 @@ def _compute_zone_flags(
     return in_zone, excavation_depth
 
 
+def _detect_blind_zones(
+    magnetic_grid: np.ndarray,
+    target_crs,
+) -> gpd.GeoDataFrame:
+    if magnetic_grid.size == 0:
+        return gpd.GeoDataFrame(columns=["geometry"], geometry="geometry", crs=target_crs)
+
+    height, width = magnetic_grid.shape
+    x_coords = np.arange(width, dtype=float)
+    y_coords = np.arange(height, dtype=float)
+    zones = find_blind_zones(
+        magnetic_grid=magnetic_grid,
+        x_coords=x_coords,
+        y_coords=y_coords,
+        threshold_nt=settings.BLIND_ZONE_THRESHOLD,
+        radius=settings.BLIND_ZONE_RADIUS,
+    )
+
+    if zones.empty:
+        return gpd.GeoDataFrame(columns=["geometry"], geometry="geometry", crs=target_crs)
+    if zones.crs != target_crs:
+        zones = zones.to_crs(target_crs)
+    return zones
+
+
 def _extract_nearby_depths(
     utility_indexes: list[int],
     utilities_gdf: gpd.GeoDataFrame,
@@ -280,6 +306,8 @@ def _build_risk_explanations(
             reasons.append("В буфере найдена учтённая коммуникация.")
         else:
             reasons.append("В буфере нет подтверждённой коммуникации.")
+        if bool(row.get("in_blind_zone", False)):
+            reasons.append("Аномалия попадает в слепую зону геофизики.")
 
         explanations.append(
             {
@@ -338,6 +366,12 @@ def run_pipeline(
     logger.info("Детекция аномалий...")
     detected = detect_linear_anomalies(magnetic_grid, threshold_nt=anomaly_threshold)
     logger.info("Найдено аномалий по магнитной сетке: %s", len(detected))
+    logger.info("Выделение слепых зон...")
+    blind_zones_gdf = _detect_blind_zones(
+        magnetic_grid=magnetic_grid,
+        target_crs=anomalies_gdf.crs,
+    )
+    logger.info("Найдено слепых зон: %s", len(blind_zones_gdf))
 
     classifier = RiskClassifier()
     identifier = UtilityTypeIdentifier()
@@ -360,6 +394,14 @@ def run_pipeline(
     result_gdf["in_construction_zone"] = result_gdf.index.map(
         lambda idx: in_zone_map.get(int(idx), False)
     )
+    if blind_zones_gdf.empty:
+        result_gdf["in_blind_zone"] = False
+    else:
+        result_gdf["in_blind_zone"] = result_gdf.geometry.apply(
+            lambda geom: bool(blind_zones_gdf.intersects(geom).any())
+            if geom is not None and not geom.is_empty
+            else False
+        )
 
     logger.info("Определение типа коммуникаций...")
     result_gdf["utility_type"] = result_gdf.apply(
@@ -417,7 +459,7 @@ def run_pipeline(
     act_path = output_dir / "act.docx"
 
     logger.info("Экспорт результатов...")
-    export_to_dxf(result_gdf, utilities_gdf, result_gdf, str(dxf_path))
+    export_to_dxf(result_gdf, utilities_gdf, blind_zones_gdf, str(dxf_path))
     create_miis_xml(result_gdf, utilities_gdf, str(xml_path))
     generate_act(
         {
@@ -443,6 +485,8 @@ def run_pipeline(
         "validation_report": validation_report,
         "risk_details": risk_details,
         "segy_features": segy_features,
+        "blind_zones_count": len(blind_zones_gdf),
+        "blind_zone_anomalies_count": int(result_gdf["in_blind_zone"].sum()),
         "dxf_path": str(dxf_path),
         "xml_path": str(xml_path),
         "act_path": str(act_path),
