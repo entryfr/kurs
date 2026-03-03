@@ -82,6 +82,10 @@ CURSOR_AUTH_MODE=bearer
 CURSOR_MODEL=gpt-4o-mini
 ```
 
+Если `/api/llm/check` возвращает `HTTP 404` для Cursor, значит текущий
+`CURSOR_LLM_PATH` недоступен для вашего ключа/endpoint. В этом случае либо
+укажите корректный openai-compatible gateway, либо используйте fallback-режим.
+
 > `.env.local` не коммитится в git.
 
 ---
@@ -129,6 +133,7 @@ python web_app.py
 ## 7) Проверка ключа перед запуском анализа
 
 Проверка выполняется через API endpoint `/api/llm/check`.
+Если в `message` есть `HTTP 404`, это признак неверного LLM endpoint.
 
 API-эквивалент:
 

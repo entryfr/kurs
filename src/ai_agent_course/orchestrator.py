@@ -169,6 +169,15 @@ def _llm_mode_hint(mode: str, provider: str) -> str:
             f"LLM не использован: для провайдера '{provider}' не найден ключ/настройки. "
             "Включён детерминированный fallback."
         )
+    if mode.startswith("fallback_cursor_chat_endpoint_404"):
+        return (
+            "LLM Cursor недоступен: endpoint chat/completions вернул HTTP 404. "
+            "Проверь CURSOR_LLM_PATH или укажи openai_compatible endpoint. "
+            "Показан детерминированный fallback-ответ."
+        )
+    if mode.startswith("fallback_http_error:"):
+        http_code = mode.split(":", 1)[1]
+        return f"LLM вызов вернул HTTP {http_code}. Показан детерминированный fallback-ответ."
     if mode.startswith("fallback_error:"):
         error_name = mode.split(":", 1)[1]
         return (

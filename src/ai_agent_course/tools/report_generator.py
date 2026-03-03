@@ -5,8 +5,12 @@ from typing import Any
 
 import ezdxf
 import geopandas as gpd
+import matplotlib
 from jinja2 import Environment
 from lxml import etree
+
+# В web/worker-потоках на Windows нужен non-GUI backend, иначе падает tkinter/main-thread.
+matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from shapely.geometry import LineString, MultiLineString
 

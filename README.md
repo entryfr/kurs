@@ -89,6 +89,10 @@ export CURSOR_AUTH_MODE="bearer"
 export CURSOR_MODEL="gpt-4o-mini"
 ```
 
+Если при проверке получаешь `HTTP 404` для `CURSOR_LLM_PATH`, значит этот endpoint
+недоступен для твоего ключа. Проверь `/api/llm/check` и укажи совместимый
+`openai_compatible` endpoint (через `LLM_BASE_URL`/`LLM_MODEL`) либо работай в fallback-режиме.
+
 ### Самый простой вариант (без env и без полей формы)
 
 Открой файл:

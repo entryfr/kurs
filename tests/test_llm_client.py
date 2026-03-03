@@ -1,4 +1,6 @@
 import json
+from io import BytesIO
+from urllib.error import HTTPError
 
 from src.ai_agent_course import llm_client
 
@@ -161,3 +163,77 @@ def test_build_engineering_answer_cursor(monkeypatch) -> None:
     )
     assert mode == "llm_cursor"
     assert "cursor" in answer.lower()
+
+
+def test_build_engineering_answer_cursor_404_returns_specific_mode(monkeypatch) -> None:
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        raise HTTPError(
+            req.full_url,
+            404,
+            "Not Found",
+            hdrs=None,
+            fp=BytesIO(b'{"message":"Route POST:/v1/chat/completions not found"}'),
+        )
+
+    monkeypatch.setattr(llm_client.url_request, "urlopen", _fake_urlopen)
+    cfg = llm_client.LLMConfig(
+        provider="cursor",
+        api_key="crsr_key",
+        model="gpt-4o-mini",
+        base_url="https://api.cursor.com",
+        endpoint_path="/v1/chat/completions",
+        auth_mode="bearer",
+    )
+    answer, mode = llm_client.build_engineering_answer(
+        prompt="Проанализируй",
+        anomalies=[],
+        validation={"issues_by_rule": {}},
+        config=cfg,
+    )
+    assert answer == ""
+    assert mode == "fallback_cursor_chat_endpoint_404"
+
+
+def test_check_llm_connectivity_cursor_404_reports_key_status(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, payload: dict):
+            self._payload = json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self._payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        if req.full_url.endswith("/v1/chat/completions"):
+            raise HTTPError(
+                req.full_url,
+                404,
+                "Not Found",
+                hdrs=None,
+                fp=BytesIO(b'{"message":"Route POST:/v1/chat/completions not found"}'),
+            )
+        if req.full_url.endswith("/v0/me"):
+            return _FakeResponse({"apiKeyName": "Local Cursor Key", "createdAt": "2026-01-01T00:00:00Z"})
+        raise AssertionError(f"Unexpected URL: {req.full_url}")
+
+    monkeypatch.setattr(llm_client.url_request, "urlopen", _fake_urlopen)
+    cfg = llm_client.LLMConfig(
+        provider="cursor",
+        api_key="crsr_key",
+        model="gpt-4o-mini",
+        base_url="https://api.cursor.com",
+        endpoint_path="/v1/chat/completions",
+        auth_mode="bearer",
+    )
+    status = llm_client.check_llm_connectivity(cfg)
+    assert status["ok"] is False
+    assert status["provider"] == "cursor"
+    assert "/v0/me" in status["message"]
+    assert "404" in status["message"]

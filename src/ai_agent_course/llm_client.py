@@ -130,6 +130,26 @@ def _parse_completion_response(raw: str) -> str:
     raise ValueError("Не удалось извлечь текст из ответа LLM endpoint")
 
 
+def _http_error_details(exc: url_error.HTTPError, limit: int = 500) -> str:
+    try:
+        payload = exc.read().decode("utf-8", errors="ignore").strip()
+    except Exception:  # noqa: BLE001
+        payload = ""
+    if payload:
+        return payload[:limit]
+    return str(exc)
+
+
+def _cursor_auth_headers(api_key: str, auth_mode: str) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if auth_mode == "basic":
+        token = base64.b64encode(f"{api_key}:".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
 def _call_openai_compatible(config: LLMConfig, prompt: str) -> str:
     assert config.base_url is not None
     assert config.api_key is not None
@@ -168,12 +188,7 @@ def _call_cursor(config: LLMConfig, prompt: str) -> str:
     body = json.dumps(payload).encode("utf-8")
     endpoint = f"{config.base_url}{config.endpoint_path}"
 
-    headers = {"Content-Type": "application/json"}
-    if config.auth_mode == "basic":
-        token = base64.b64encode(f"{config.api_key}:".encode("utf-8")).decode("ascii")
-        headers["Authorization"] = f"Basic {token}"
-    else:
-        headers["Authorization"] = f"Bearer {config.api_key}"
+    headers = _cursor_auth_headers(config.api_key, config.auth_mode)
 
     req = url_request.Request(
         endpoint,
@@ -184,6 +199,48 @@ def _call_cursor(config: LLMConfig, prompt: str) -> str:
     with url_request.urlopen(req, timeout=config.timeout_seconds) as response:
         raw = response.read().decode("utf-8")
     return _parse_completion_response(raw)
+
+
+def _call_cursor_key_info(config: LLMConfig) -> dict[str, Any]:
+    """Проверка валидности Cursor API key через официальный endpoint /v0/me."""
+    assert config.base_url is not None
+    assert config.api_key is not None
+    endpoint = f"{config.base_url}/v0/me"
+
+    # На практике встречаются разные требования auth; пробуем текущий режим, затем альтернативный.
+    modes = [config.auth_mode]
+    if config.auth_mode == "bearer":
+        modes.append("basic")
+    elif config.auth_mode == "basic":
+        modes.append("bearer")
+
+    last_exc: Exception | None = None
+    for idx, mode in enumerate(modes):
+        try:
+            req = url_request.Request(
+                endpoint,
+                headers=_cursor_auth_headers(config.api_key, mode),
+                method="GET",
+            )
+            with url_request.urlopen(req, timeout=min(config.timeout_seconds, 12.0)) as response:
+                raw = response.read().decode("utf-8")
+            decoded = json.loads(raw)
+            if isinstance(decoded, dict):
+                return decoded
+            return {"raw": raw}
+        except url_error.HTTPError as exc:
+            last_exc = exc
+            # Если авторизация не подошла, пробуем альтернативный режим.
+            if exc.code == 401 and idx + 1 < len(modes):
+                continue
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            break
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Не удалось проверить Cursor API key через /v0/me")
 
 
 def build_engineering_answer(
@@ -229,8 +286,19 @@ def build_engineering_answer(
             return answer, "llm_cursor"
 
         return "", f"fallback_unknown_provider:{config.provider}"
+    except url_error.HTTPError as exc:
+        details = _http_error_details(exc)
+        logger.exception(
+            "LLM вызов завершился HTTP ошибкой (%s, status=%s): %s",
+            config.provider,
+            exc.code,
+            details,
+        )
+        if config.provider == "cursor" and exc.code == 404:
+            return "", "fallback_cursor_chat_endpoint_404"
+        return "", f"fallback_http_error:{exc.code}"
     except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
-        logger.exception("LLM вызов завершился ошибкой (%s)", config.provider)
+        logger.exception("LLM вызов завершился ошибкой (%s): %s", config.provider, exc)
         return "", f"fallback_error:{type(exc).__name__}"
 
 
@@ -287,19 +355,59 @@ def check_llm_connectivity(config: LLMConfig) -> dict[str, Any]:
             }
 
         if config.provider == "cursor":
-            content = _call_cursor(config, "Ответь строго одним словом: OK")
-            ok = "ok" in content.lower()
-            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
-            return {
-                "ok": ok,
-                "provider": config.provider,
-                "model": config.model,
-                "base_url": config.base_url,
-                "auth_mode": config.auth_mode,
-                "endpoint_path": config.endpoint_path,
-                "message": "Подключение к Cursor endpoint проверено." if ok else f"Неожиданный ответ: {content}",
-                "latency_ms": latency_ms,
-            }
+            try:
+                content = _call_cursor(config, "Ответь строго одним словом: OK")
+                ok = "ok" in content.lower()
+                latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                return {
+                    "ok": ok,
+                    "provider": config.provider,
+                    "model": config.model,
+                    "base_url": config.base_url,
+                    "auth_mode": config.auth_mode,
+                    "endpoint_path": config.endpoint_path,
+                    "message": "Подключение к Cursor endpoint проверено." if ok else f"Неожиданный ответ: {content}",
+                    "latency_ms": latency_ms,
+                }
+            except url_error.HTTPError as exc:
+                details = _http_error_details(exc)
+                # Частый кейс: ключ рабочий, но endpoint /chat/completions у Cursor не существует.
+                if exc.code == 404:
+                    try:
+                        info = _call_cursor_key_info(config)
+                        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                        api_key_name = info.get("apiKeyName")
+                        key_suffix = f" Ключ: {api_key_name}." if api_key_name else ""
+                        return {
+                            "ok": False,
+                            "provider": config.provider,
+                            "model": config.model,
+                            "base_url": config.base_url,
+                            "auth_mode": config.auth_mode,
+                            "endpoint_path": config.endpoint_path,
+                            "message": (
+                                "Cursor key валиден (/v0/me), но указанный LLM endpoint недоступен (HTTP 404). "
+                                "Проверь CURSOR_LLM_PATH или используй совместимый openai_compatible endpoint."
+                                f"{key_suffix}"
+                            ),
+                            "latency_ms": latency_ms,
+                        }
+                    except Exception as key_exc:  # noqa: BLE001
+                        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                        return {
+                            "ok": False,
+                            "provider": config.provider,
+                            "model": config.model,
+                            "base_url": config.base_url,
+                            "auth_mode": config.auth_mode,
+                            "endpoint_path": config.endpoint_path,
+                            "message": (
+                                "Cursor endpoint вернул 404, и ключ через /v0/me проверить не удалось: "
+                                f"{type(key_exc).__name__}: {key_exc}. Детали 404: {details}"
+                            ),
+                            "latency_ms": latency_ms,
+                        }
+                raise
 
         latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
         return {
@@ -307,6 +415,16 @@ def check_llm_connectivity(config: LLMConfig) -> dict[str, Any]:
             "provider": config.provider,
             "model": config.model,
             "message": f"Неизвестный provider: {config.provider}",
+            "latency_ms": latency_ms,
+        }
+    except url_error.HTTPError as exc:
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "base_url": config.base_url,
+            "message": f"Ошибка подключения HTTP {exc.code}: {_http_error_details(exc)}",
             "latency_ms": latency_ms,
         }
     except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
