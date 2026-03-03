@@ -51,12 +51,25 @@
             <label for="llm_api_key">API Key (не сохраняется в файлы проекта)</label>
             <input id="llm_api_key" name="llm_api_key" type="password" value="" autocomplete="off" style="width: 100%; box-sizing: border-box; margin-bottom: 12px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px;">
 
-            <button type="submit">Запустить анализ</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="submit">Запустить анализ</button>
+                <button type="submit" formaction="/llm/check">Проверить LLM ключ</button>
+            </div>
         </form>
     </div>
 
     {% if error %}
     <div class="card error">{{ error }}</div>
+    {% endif %}
+
+    {% if llm_check %}
+    <div class="card {% if not llm_check.ok %}error{% endif %}">
+        <h2>Проверка LLM</h2>
+        <p><strong>ok:</strong> {{ llm_check.ok }}</p>
+        <p><strong>provider:</strong> {{ llm_check.provider }} · <strong>model:</strong> {{ llm_check.model }}</p>
+        <p><strong>latency_ms:</strong> {{ llm_check.latency_ms }}</p>
+        <p>{{ llm_check.message }}</p>
+    </div>
     {% endif %}
 
     {% if result %}

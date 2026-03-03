@@ -163,6 +163,24 @@ def _fallback_answer(anomalies: list[dict[str, Any]], validation: dict[str, Any]
     )
 
 
+def _llm_mode_hint(mode: str, provider: str) -> str:
+    if mode.startswith("fallback_no_key"):
+        return (
+            f"LLM не использован: для провайдера '{provider}' не найден ключ/настройки. "
+            "Включён детерминированный fallback."
+        )
+    if mode.startswith("fallback_error:"):
+        error_name = mode.split(":", 1)[1]
+        return (
+            f"LLM вызов завершился ошибкой ({error_name}). "
+            "Показан детерминированный fallback-ответ."
+        )
+    if mode.startswith("fallback_unknown_provider:"):
+        provider_name = mode.split(":", 1)[1]
+        return f"LLM провайдер '{provider_name}' не поддерживается, применён fallback."
+    return "LLM не использован, применён fallback."
+
+
 class EngineeringSurveyAgent:
     def __init__(self) -> None:
         self.risk_classifier = DamageRiskClassifier()
@@ -348,7 +366,8 @@ class EngineeringSurveyAgent:
         )
         answer, mode = build_engineering_answer(prompt, anomaly_outputs, validation, llm_config)
         if not answer:
-            answer = _fallback_answer(anomaly_outputs, validation, context)
+            reason = _llm_mode_hint(mode, llm_config.provider)
+            answer = f"{reason}\n\n{_fallback_answer(anomaly_outputs, validation, context)}"
             mode = f"{mode}_with_deterministic_answer"
 
         metrics = {

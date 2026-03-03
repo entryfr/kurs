@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.ai_agent_course.orchestrator import EngineeringSurveyAgent
+from src.ai_agent_course.llm_client import check_llm_connectivity, resolve_llm_config
 from src.ai_agent_course.secrets_loader import load_local_env
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,21 @@ def _default_form() -> dict[str, Any]:
     }
 
 
+def _build_context(
+    form: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+    llm_check: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "form": form or _default_form(),
+        "result": result,
+        "error": error,
+        "llm_check": llm_check,
+        "recent_runs": _history_slice(limit=10),
+    }
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -154,12 +170,7 @@ def healthz() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
-    context = {
-        "form": _default_form(),
-        "result": None,
-        "error": None,
-        "recent_runs": _history_slice(limit=10),
-    }
+    context = _build_context()
     return templates.TemplateResponse(request, "agent_v2/index.html", context)
 
 
@@ -195,21 +206,47 @@ def analyze_from_form(
             llm_model=llm_model.strip() or None,
             llm_base_url=llm_base_url.strip() or None,
         )
-        context = {
-            "form": form_data,
-            "result": result,
-            "error": None,
-            "recent_runs": _history_slice(limit=10),
-        }
+        context = _build_context(form=form_data, result=result, error=None, llm_check=None)
         return templates.TemplateResponse(request, "agent_v2/index.html", context)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ошибка анализа в V2 форме")
-        context = {
-            "form": form_data,
-            "result": None,
-            "error": str(exc),
-            "recent_runs": _history_slice(limit=10),
-        }
+        context = _build_context(form=form_data, result=None, error=str(exc), llm_check=None)
+        return templates.TemplateResponse(
+            request,
+            "agent_v2/index.html",
+            context,
+            status_code=400,
+        )
+
+
+@app.post("/llm/check", response_class=HTMLResponse)
+def llm_check_from_form(
+    request: Request,
+    prompt: str = Form(default=""),
+    llm_provider: str = Form(default="auto"),
+    llm_api_key: str = Form(default=""),
+    llm_model: str = Form(default=""),
+    llm_base_url: str = Form(default=""),
+) -> HTMLResponse:
+    form_data = {
+        "prompt": prompt or _default_form()["prompt"],
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
+        "llm_base_url": llm_base_url,
+    }
+    try:
+        config = resolve_llm_config(
+            provider=llm_provider,
+            api_key=llm_api_key.strip() or None,
+            model=llm_model.strip() or None,
+            base_url=llm_base_url.strip() or None,
+        )
+        status = check_llm_connectivity(config)
+        context = _build_context(form=form_data, result=None, error=None, llm_check=status)
+        return templates.TemplateResponse(request, "agent_v2/index.html", context)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Ошибка проверки LLM из формы")
+        context = _build_context(form=form_data, result=None, error=str(exc), llm_check=None)
         return templates.TemplateResponse(
             request,
             "agent_v2/index.html",
@@ -246,6 +283,22 @@ def analyze_api(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ошибка анализа в V2 API")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/llm/check")
+def llm_check_api(
+    llm_provider: str = Form(default="auto"),
+    llm_api_key: str = Form(default=""),
+    llm_model: str = Form(default=""),
+    llm_base_url: str = Form(default=""),
+) -> dict[str, Any]:
+    config = resolve_llm_config(
+        provider=llm_provider,
+        api_key=llm_api_key.strip() or None,
+        model=llm_model.strip() or None,
+        base_url=llm_base_url.strip() or None,
+    )
+    return check_llm_connectivity(config)
 
 
 @app.get("/api/runs")

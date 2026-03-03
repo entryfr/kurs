@@ -69,3 +69,42 @@ def test_build_engineering_answer_openai_compatible(monkeypatch) -> None:
     )
     assert mode == "llm_openai_compatible"
     assert "инженерному анализу" in answer.lower()
+
+
+def test_check_llm_connectivity_none_provider() -> None:
+    cfg = llm_client.LLMConfig(provider="none", api_key=None, model="none")
+    status = llm_client.check_llm_connectivity(cfg)
+    assert status["ok"] is False
+    assert status["provider"] == "none"
+
+
+def test_check_llm_connectivity_openai_compatible(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, payload: dict):
+            self._payload = json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self._payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(req, timeout=0):
+        _ = req
+        _ = timeout
+        return _FakeResponse({"choices": [{"message": {"content": "OK"}}]})
+
+    monkeypatch.setattr(llm_client.url_request, "urlopen", _fake_urlopen)
+    cfg = llm_client.LLMConfig(
+        provider="openai_compatible",
+        api_key="key",
+        model="demo-model",
+        base_url="https://example.local/v1",
+        timeout_seconds=5.0,
+    )
+    status = llm_client.check_llm_connectivity(cfg)
+    assert status["ok"] is True
+    assert status["provider"] == "openai_compatible"

@@ -97,3 +97,54 @@ def test_v2_api_runs(monkeypatch) -> None:
     payload = response.json()
     assert payload["count"] == 1
     assert payload["items"][0]["run_id"] == "run-42"
+
+
+def test_v2_api_llm_check(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.ai_agent_course.web.check_llm_connectivity",
+        lambda config: {
+            "ok": True,
+            "provider": config.provider,
+            "model": config.model,
+            "message": "ok",
+            "latency_ms": 12.3,
+        },
+    )
+    response = client.post(
+        "/api/llm/check",
+        data={
+            "llm_provider": "openai_compatible",
+            "llm_api_key": "key",
+            "llm_model": "demo",
+            "llm_base_url": "https://example.local/v1",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["provider"] == "openai_compatible"
+
+
+def test_v2_form_llm_check(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.ai_agent_course.web.check_llm_connectivity",
+        lambda config: {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "message": "bad key",
+            "latency_ms": 5.0,
+        },
+    )
+    response = client.post(
+        "/llm/check",
+        data={
+            "prompt": "Тест",
+            "llm_provider": "anthropic",
+            "llm_model": "claude",
+            "llm_api_key": "bad",
+        },
+    )
+    assert response.status_code == 200
+    assert "Проверка LLM" in response.text
+    assert "bad key" in response.text

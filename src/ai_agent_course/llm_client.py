@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib import error as url_error
@@ -129,4 +130,76 @@ def build_engineering_answer(
     except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
         logger.exception("LLM вызов завершился ошибкой (%s)", config.provider)
         return "", f"fallback_error:{type(exc).__name__}"
+
+
+def check_llm_connectivity(config: LLMConfig) -> dict[str, Any]:
+    started = time.perf_counter()
+    if config.provider == "none":
+        return {
+            "ok": False,
+            "provider": "none",
+            "model": "none",
+            "message": "Ключ/провайдер не настроены. Агент будет работать в fallback-режиме.",
+            "latency_ms": 0.0,
+        }
+
+    try:
+        if config.provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            assert config.api_key is not None
+            llm = ChatAnthropic(
+                model=config.model,
+                anthropic_api_key=config.api_key,
+                timeout=config.timeout_seconds,
+                max_tokens=16,
+                temperature=0.0,
+            )
+            response = llm.invoke("Ответь строго одним словом: OK")
+            content = str(getattr(response, "content", response)).strip()
+            ok = "ok" in content.lower()
+            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            return {
+                "ok": ok,
+                "provider": config.provider,
+                "model": config.model,
+                "message": "Подключение к Anthropic проверено." if ok else f"Неожиданный ответ: {content}",
+                "latency_ms": latency_ms,
+            }
+
+        if config.provider == "openai_compatible":
+            content = _call_openai_compatible(config, "Ответь строго одним словом: OK")
+            ok = "ok" in content.lower()
+            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            return {
+                "ok": ok,
+                "provider": config.provider,
+                "model": config.model,
+                "base_url": config.base_url,
+                "message": (
+                    "Подключение к openai-compatible endpoint проверено."
+                    if ok
+                    else f"Неожиданный ответ: {content}"
+                ),
+                "latency_ms": latency_ms,
+            }
+
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "message": f"Неизвестный provider: {config.provider}",
+            "latency_ms": latency_ms,
+        }
+    except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "base_url": config.base_url,
+            "message": f"Ошибка подключения: {type(exc).__name__}: {exc}",
+            "latency_ms": latency_ms,
+        }
 

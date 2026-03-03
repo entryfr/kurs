@@ -3,6 +3,9 @@
 Новый проект с нуля: загрузка **картинки** и **текстового запроса** для выявления
 неучтённых подземных коммуникаций по ТЗ.
 
+Подробный локальный гайд (включая требования к изображению):
+- `docs/local_run_guide.md`
+
 ## Что уже реализовано
 
 - Входной сценарий: `image + prompt (+ optional MIIS XML)`.
@@ -48,6 +51,7 @@ python web_app.py
 - `http://localhost:8000/docs`
 - `http://localhost:8000/healthz`
 - `http://localhost:8000/api/runs` (история последних запусков V2)
+- `POST /api/llm/check` (проверка LLM-конфига)
 
 ### Как работает LLM без ключа
 
@@ -76,6 +80,7 @@ export LLM_MODEL="gpt-4o-mini"
 ```
 
 В веб-форме можно передать ключ/провайдер прямо в запросе (ключ не сохраняется в файлы проекта).
+Также есть кнопка **«Проверить LLM ключ»** — выполняет тестовый пинг провайдера.
 
 ### Как «оставить» ключ локально (рекомендуется)
 
@@ -113,9 +118,20 @@ curl -X POST "http://localhost:8000/api/analyze" \
   -F "miis_xml_file=@data/raw/input.miis.xml"
 ```
 
+Проверка LLM:
+
+```bash
+curl -X POST "http://localhost:8000/api/llm/check" \
+  -F "llm_provider=openai_compatible" \
+  -F "llm_api_key=..." \
+  -F "llm_model=gpt-4o-mini" \
+  -F "llm_base_url=https://your-endpoint.example/v1"
+```
+
 ## Тесты
 
 ```bash
 pytest tests/test_agent_v2_web.py -v
 pytest tests/test_llm_client.py -v
+pytest tests/test_secrets_loader.py -v
 ```
