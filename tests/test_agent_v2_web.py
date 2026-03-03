@@ -51,6 +51,7 @@ def test_v2_index_loads() -> None:
     assert response.status_code == 200
     assert "Новый AI-агент" in response.text
     assert 'name="llm_provider"' not in response.text
+    assert 'name="miis_xml_file"' not in response.text
     assert "Проверить LLM ключ" not in response.text
 
 
