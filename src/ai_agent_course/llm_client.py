@@ -1,0 +1,440 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+import base64
+from dataclasses import dataclass
+from typing import Any
+from urllib import error as url_error
+from urllib import request as url_request
+
+logger = logging.getLogger(__name__)
+
+try:
+    from src.ai_agent_course import local_key
+except Exception:  # noqa: BLE001
+    local_key = None
+
+
+@dataclass(slots=True)
+class LLMConfig:
+    provider: str
+    api_key: str | None
+    model: str
+    base_url: str | None = None
+    timeout_seconds: float = 25.0
+    endpoint_path: str = "/chat/completions"
+    auth_mode: str = "bearer"
+
+
+def _first_non_empty(*values: str | None) -> str:
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def resolve_llm_config(
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> LLMConfig:
+    requested_provider = (provider or os.getenv("LLM_PROVIDER", "auto")).strip().lower()
+
+    anthropic_key = _first_non_empty(api_key, os.getenv("ANTHROPIC_API_KEY"))
+    if requested_provider in {"auto", "anthropic"} and anthropic_key:
+        return LLMConfig(
+            provider="anthropic",
+            api_key=anthropic_key,
+            model=(model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")).strip(),
+            timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
+        )
+
+    local_cursor_key = ""
+    local_cursor_base = ""
+    local_cursor_path = ""
+    local_cursor_auth = ""
+    local_cursor_model = ""
+    if local_key is not None:
+        local_cursor_key = _first_non_empty(getattr(local_key, "CURSOR_API_KEY", ""))
+        local_cursor_base = _first_non_empty(getattr(local_key, "CURSOR_BASE_URL", ""))
+        local_cursor_path = _first_non_empty(getattr(local_key, "CURSOR_LLM_PATH", ""))
+        local_cursor_auth = _first_non_empty(getattr(local_key, "CURSOR_AUTH_MODE", ""))
+        local_cursor_model = _first_non_empty(getattr(local_key, "CURSOR_MODEL", ""))
+        if local_cursor_key == "PASTE_YOUR_CURSOR_API_KEY_HERE":
+            local_cursor_key = ""
+
+    cursor_key = _first_non_empty(api_key, os.getenv("CURSOR_API_KEY"), local_cursor_key)
+    if requested_provider in {"auto", "cursor"} and cursor_key:
+        if requested_provider == "cursor" or cursor_key.startswith(("crsr_", "key_")):
+            cursor_base = _first_non_empty(
+                base_url, os.getenv("CURSOR_BASE_URL"), local_cursor_base, "https://api.cursor.com"
+            )
+            cursor_path = _first_non_empty(
+                os.getenv("CURSOR_LLM_PATH"), local_cursor_path, "/v1/chat/completions"
+            )
+            auth_mode = _first_non_empty(os.getenv("CURSOR_AUTH_MODE"), local_cursor_auth, "bearer").lower()
+            return LLMConfig(
+                provider="cursor",
+                api_key=cursor_key,
+                model=(model or _first_non_empty(os.getenv("CURSOR_MODEL"), local_cursor_model, "gpt-4o-mini")).strip(),
+                base_url=cursor_base.rstrip("/"),
+                timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
+                endpoint_path=cursor_path if cursor_path.startswith("/") else f"/{cursor_path}",
+                auth_mode=auth_mode if auth_mode in {"bearer", "basic"} else "bearer",
+            )
+
+    generic_key = _first_non_empty(api_key, os.getenv("LLM_API_KEY"), os.getenv("OPENAI_API_KEY"))
+    generic_base = _first_non_empty(base_url, os.getenv("LLM_BASE_URL"), os.getenv("OPENAI_BASE_URL"))
+    if requested_provider in {"auto", "openai_compatible"} and generic_key and generic_base:
+        return LLMConfig(
+            provider="openai_compatible",
+            api_key=generic_key,
+            model=(model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip(),
+            base_url=generic_base.rstrip("/"),
+            timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
+            endpoint_path="/chat/completions",
+            auth_mode="bearer",
+        )
+
+    return LLMConfig(provider="none", api_key=None, model="none", base_url=None)
+
+
+def _parse_completion_response(raw: str) -> str:
+    decoded = json.loads(raw)
+    choices = decoded.get("choices", [])
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if content:
+            return str(content).strip()
+        text = choices[0].get("text")
+        if text:
+            return str(text).strip()
+
+    output_text = decoded.get("output_text")
+    if output_text:
+        return str(output_text).strip()
+
+    message = decoded.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    if isinstance(message, dict):
+        content = message.get("content")
+        if content:
+            return str(content).strip()
+
+    raise ValueError("Не удалось извлечь текст из ответа LLM endpoint")
+
+
+def _http_error_details(exc: url_error.HTTPError, limit: int = 500) -> str:
+    try:
+        payload = exc.read().decode("utf-8", errors="ignore").strip()
+    except Exception:  # noqa: BLE001
+        payload = ""
+    if payload:
+        return payload[:limit]
+    return str(exc)
+
+
+def _cursor_auth_headers(api_key: str, auth_mode: str) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if auth_mode == "basic":
+        token = base64.b64encode(f"{api_key}:".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _call_openai_compatible(config: LLMConfig, prompt: str) -> str:
+    assert config.base_url is not None
+    assert config.api_key is not None
+    payload = {
+        "model": config.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 900,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    endpoint = f"{config.base_url}{config.endpoint_path}"
+
+    req = url_request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {config.api_key}",
+        },
+        method="POST",
+    )
+    with url_request.urlopen(req, timeout=config.timeout_seconds) as response:
+        raw = response.read().decode("utf-8")
+    return _parse_completion_response(raw)
+
+
+def _call_cursor(config: LLMConfig, prompt: str) -> str:
+    assert config.base_url is not None
+    assert config.api_key is not None
+    payload = {
+        "model": config.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 900,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    endpoint = f"{config.base_url}{config.endpoint_path}"
+
+    headers = _cursor_auth_headers(config.api_key, config.auth_mode)
+
+    req = url_request.Request(
+        endpoint,
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    with url_request.urlopen(req, timeout=config.timeout_seconds) as response:
+        raw = response.read().decode("utf-8")
+    return _parse_completion_response(raw)
+
+
+def _call_cursor_key_info(config: LLMConfig) -> dict[str, Any]:
+    """Проверка валидности Cursor API key через официальный endpoint /v0/me."""
+    assert config.base_url is not None
+    assert config.api_key is not None
+    endpoint = f"{config.base_url}/v0/me"
+
+    # На практике встречаются разные требования auth; пробуем текущий режим, затем альтернативный.
+    modes = [config.auth_mode]
+    if config.auth_mode == "bearer":
+        modes.append("basic")
+    elif config.auth_mode == "basic":
+        modes.append("bearer")
+
+    last_exc: Exception | None = None
+    for idx, mode in enumerate(modes):
+        try:
+            req = url_request.Request(
+                endpoint,
+                headers=_cursor_auth_headers(config.api_key, mode),
+                method="GET",
+            )
+            with url_request.urlopen(req, timeout=min(config.timeout_seconds, 12.0)) as response:
+                raw = response.read().decode("utf-8")
+            decoded = json.loads(raw)
+            if isinstance(decoded, dict):
+                return decoded
+            return {"raw": raw}
+        except url_error.HTTPError as exc:
+            last_exc = exc
+            # Если авторизация не подошла, пробуем альтернативный режим.
+            if exc.code == 401 and idx + 1 < len(modes):
+                continue
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            break
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Не удалось проверить Cursor API key через /v0/me")
+
+
+def build_engineering_answer(
+    prompt: str,
+    anomalies: list[dict[str, Any]],
+    validation: dict[str, Any],
+    config: LLMConfig,
+) -> tuple[str, str]:
+    if config.provider == "none":
+        return "", "fallback_no_key"
+
+    compact = anomalies[:8]
+    prompt_text = (
+        "Ты инженер-изыскатель. Дай краткий вывод по результатам автоматического анализа.\n"
+        f"Запрос: {prompt}\n"
+        f"Аномалии: {compact}\n"
+        f"Нарушения: {validation.get('issues_by_rule', {})}\n"
+        "Сформируй итог на русском: риски, рекомендации, что делать на площадке."
+    )
+
+    try:
+        if config.provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            assert config.api_key is not None
+            llm = ChatAnthropic(
+                model=config.model,
+                anthropic_api_key=config.api_key,
+                timeout=config.timeout_seconds,
+                max_tokens=900,
+                temperature=0.1,
+            )
+            response = llm.invoke(prompt_text)
+            answer = str(getattr(response, "content", response)).strip()
+            return answer, "llm_anthropic"
+
+        if config.provider == "openai_compatible":
+            answer = _call_openai_compatible(config, prompt_text)
+            return answer, "llm_openai_compatible"
+
+        if config.provider == "cursor":
+            answer = _call_cursor(config, prompt_text)
+            return answer, "llm_cursor"
+
+        return "", f"fallback_unknown_provider:{config.provider}"
+    except url_error.HTTPError as exc:
+        details = _http_error_details(exc)
+        logger.exception(
+            "LLM вызов завершился HTTP ошибкой (%s, status=%s): %s",
+            config.provider,
+            exc.code,
+            details,
+        )
+        if config.provider == "cursor" and exc.code == 404:
+            return "", "fallback_cursor_chat_endpoint_404"
+        return "", f"fallback_http_error:{exc.code}"
+    except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
+        logger.exception("LLM вызов завершился ошибкой (%s): %s", config.provider, exc)
+        return "", f"fallback_error:{type(exc).__name__}"
+
+
+def check_llm_connectivity(config: LLMConfig) -> dict[str, Any]:
+    started = time.perf_counter()
+    if config.provider == "none":
+        return {
+            "ok": False,
+            "provider": "none",
+            "model": "none",
+            "message": "Ключ/провайдер не настроены. Агент будет работать в fallback-режиме.",
+            "latency_ms": 0.0,
+        }
+
+    try:
+        if config.provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            assert config.api_key is not None
+            llm = ChatAnthropic(
+                model=config.model,
+                anthropic_api_key=config.api_key,
+                timeout=config.timeout_seconds,
+                max_tokens=16,
+                temperature=0.0,
+            )
+            response = llm.invoke("Ответь строго одним словом: OK")
+            content = str(getattr(response, "content", response)).strip()
+            ok = "ok" in content.lower()
+            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            return {
+                "ok": ok,
+                "provider": config.provider,
+                "model": config.model,
+                "message": "Подключение к Anthropic проверено." if ok else f"Неожиданный ответ: {content}",
+                "latency_ms": latency_ms,
+            }
+
+        if config.provider == "openai_compatible":
+            content = _call_openai_compatible(config, "Ответь строго одним словом: OK")
+            ok = "ok" in content.lower()
+            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            return {
+                "ok": ok,
+                "provider": config.provider,
+                "model": config.model,
+                "base_url": config.base_url,
+                "message": (
+                    "Подключение к openai-compatible endpoint проверено."
+                    if ok
+                    else f"Неожиданный ответ: {content}"
+                ),
+                "latency_ms": latency_ms,
+            }
+
+        if config.provider == "cursor":
+            try:
+                content = _call_cursor(config, "Ответь строго одним словом: OK")
+                ok = "ok" in content.lower()
+                latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                return {
+                    "ok": ok,
+                    "provider": config.provider,
+                    "model": config.model,
+                    "base_url": config.base_url,
+                    "auth_mode": config.auth_mode,
+                    "endpoint_path": config.endpoint_path,
+                    "message": "Подключение к Cursor endpoint проверено." if ok else f"Неожиданный ответ: {content}",
+                    "latency_ms": latency_ms,
+                }
+            except url_error.HTTPError as exc:
+                details = _http_error_details(exc)
+                # Частый кейс: ключ рабочий, но endpoint /chat/completions у Cursor не существует.
+                if exc.code == 404:
+                    try:
+                        info = _call_cursor_key_info(config)
+                        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                        api_key_name = info.get("apiKeyName")
+                        key_suffix = f" Ключ: {api_key_name}." if api_key_name else ""
+                        return {
+                            "ok": False,
+                            "provider": config.provider,
+                            "model": config.model,
+                            "base_url": config.base_url,
+                            "auth_mode": config.auth_mode,
+                            "endpoint_path": config.endpoint_path,
+                            "message": (
+                                "Cursor key валиден (/v0/me), но указанный LLM endpoint недоступен (HTTP 404). "
+                                "Проверь CURSOR_LLM_PATH или используй совместимый openai_compatible endpoint."
+                                f"{key_suffix}"
+                            ),
+                            "latency_ms": latency_ms,
+                        }
+                    except Exception as key_exc:  # noqa: BLE001
+                        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                        return {
+                            "ok": False,
+                            "provider": config.provider,
+                            "model": config.model,
+                            "base_url": config.base_url,
+                            "auth_mode": config.auth_mode,
+                            "endpoint_path": config.endpoint_path,
+                            "message": (
+                                "Cursor endpoint вернул 404, и ключ через /v0/me проверить не удалось: "
+                                f"{type(key_exc).__name__}: {key_exc}. Детали 404: {details}"
+                            ),
+                            "latency_ms": latency_ms,
+                        }
+                raise
+
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "message": f"Неизвестный provider: {config.provider}",
+            "latency_ms": latency_ms,
+        }
+    except url_error.HTTPError as exc:
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "base_url": config.base_url,
+            "message": f"Ошибка подключения HTTP {exc.code}: {_http_error_details(exc)}",
+            "latency_ms": latency_ms,
+        }
+    except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return {
+            "ok": False,
+            "provider": config.provider,
+            "model": config.model,
+            "base_url": config.base_url,
+            "message": f"Ошибка подключения: {type(exc).__name__}: {exc}",
+            "latency_ms": latency_ms,
+        }
+

@@ -4,17 +4,38 @@
 # подземных инженерных коммуникаций
 # ─────────────────────────────────────────────────────────────────────────────
 
+import os
+
 # ── Геопространственные системы координат ────────────────────────────────────
 CRS_INPUT   = "EPSG:4936"   # ПЗ-90.11 (геоцентрические, используется с pyproj)
 CRS_LOCAL   = "EPSG:28406"  # СК-42 / Гаусс-Крюгер зона 6 (МСК-50 / Москва)
 CRS_WGS84   = "EPSG:4326"   # WGS-84 — стандарт OSM/Overpass
 CRS_UTM37N  = "EPSG:32637"  # UTM зона 37N — метрическая CRS для Москвы (для расчётов)
 
-# ── Допуски при геодезической привязке ───────────────────────────────────────
-RMS_TOLERANCE = 0.05          # СКО аффинного преобразования, метры (СП 47.13330)
+# ── Профили нормативных допусков ─────────────────────────────────────────────
+NORMATIVE_PROFILES = {
+    "demo": {
+        "rms_tolerance": 0.18,
+        "buffer_distance": 3.0,
+        "description": "Демонстрационный профиль для пилотных запусков.",
+    },
+    "normative": {
+        "rms_tolerance": 0.18,
+        "buffer_distance": 2.5,
+        "description": "Профиль, ориентированный на требования СП 47.",
+    },
+    "strict": {
+        "rms_tolerance": 0.05,
+        "buffer_distance": 2.0,
+        "description": "Строгий внутренний контроль качества.",
+    },
+}
 
-# ── Буферные зоны ────────────────────────────────────────────────────────────
-BUFFER_DISTANCE = 3.0         # Радиус буфера вокруг аномалии, метры
+DEFAULT_NORMS_PROFILE = "normative"
+
+# Значения по умолчанию для обратной совместимости модулей
+RMS_TOLERANCE = NORMATIVE_PROFILES[DEFAULT_NORMS_PROFILE]["rms_tolerance"]
+BUFFER_DISTANCE = NORMATIVE_PROFILES[DEFAULT_NORMS_PROFILE]["buffer_distance"]
 
 # ── Весовые коэффициенты последствий (для формулы риска R = P * C * (1-D)) ──
 # Чем выше — тем серьёзнее последствия повреждения коммуникации
@@ -71,3 +92,16 @@ DXF_OUTPUT_PATH  = "output/scheme.dxf"
 MIIS_OUTPUT_PATH = "output/miis_output.xml"
 ACT_OUTPUT_PATH  = "output/act.docx"
 ACT_TEMPLATE     = "templates/act_template.jinja2"
+
+# ── Настройки хранения результатов в PostGIS ────────────────────────────────
+# Например:
+# POSTGRES_DSN=postgresql+psycopg2://user:password@localhost:5432/geophysics
+POSTGRES_DSN = os.getenv("POSTGRES_DSN", "").strip()
+ENABLE_DB_PERSISTENCE = os.getenv("ENABLE_DB_PERSISTENCE", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
