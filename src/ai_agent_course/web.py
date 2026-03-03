@@ -141,10 +141,7 @@ def _default_form() -> dict[str, Any]:
             "координаты 55.6721°N, 37.6415°E, площадь 8.4 га, "
             "глубина котлована 6.5 м, аномалия магнитного поля: амплитуда 68 нТл, "
             "протяжённость 42 м, глубина по ВЭЗ 1.8 м."
-        ),
-        "llm_provider": "auto",
-        "llm_model": "",
-        "llm_base_url": "",
+        )
     }
 
 
@@ -180,17 +177,8 @@ def analyze_from_form(
     prompt: str = Form(...),
     image_file: UploadFile = File(...),
     miis_xml_file: UploadFile | None = File(default=None),
-    llm_provider: str = Form(default="auto"),
-    llm_api_key: str = Form(default=""),
-    llm_model: str = Form(default=""),
-    llm_base_url: str = Form(default=""),
 ) -> HTMLResponse:
-    form_data = {
-        "prompt": prompt,
-        "llm_provider": llm_provider,
-        "llm_model": llm_model,
-        "llm_base_url": llm_base_url,
-    }
+    form_data = {"prompt": prompt}
     try:
         upload_dir = UPLOADS_DIR / str(uuid.uuid4())
         image_path = _save_upload(image_file, upload_dir, "image")
@@ -201,10 +189,6 @@ def analyze_from_form(
             prompt=prompt,
             image_path=image_path,
             miis_path=miis_path,
-            llm_provider=llm_provider,
-            llm_api_key=llm_api_key.strip() or None,
-            llm_model=llm_model.strip() or None,
-            llm_base_url=llm_base_url.strip() or None,
         )
         context = _build_context(form=form_data, result=result, error=None, llm_check=None)
         return templates.TemplateResponse(request, "agent_v2/index.html", context)

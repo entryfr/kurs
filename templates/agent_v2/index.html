@@ -34,28 +34,7 @@
             <label for="miis_xml_file">MIIS XML (опционально)</label>
             <input id="miis_xml_file" name="miis_xml_file" type="file" accept=".xml">
 
-            <h3>LLM (опционально)</h3>
-            <label for="llm_provider">Провайдер</label>
-            <select id="llm_provider" name="llm_provider" style="width: 100%; box-sizing: border-box; margin-bottom: 12px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px;">
-                <option value="auto" {% if form.llm_provider == "auto" %}selected{% endif %}>auto</option>
-                <option value="anthropic" {% if form.llm_provider == "anthropic" %}selected{% endif %}>anthropic</option>
-                <option value="openai_compatible" {% if form.llm_provider == "openai_compatible" %}selected{% endif %}>openai_compatible</option>
-                <option value="cursor" {% if form.llm_provider == "cursor" %}selected{% endif %}>cursor</option>
-            </select>
-
-            <label for="llm_model">Модель (опционально)</label>
-            <input id="llm_model" name="llm_model" type="text" value="{{ form.llm_model }}" style="width: 100%; box-sizing: border-box; margin-bottom: 12px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px;">
-
-            <label for="llm_base_url">Base URL (для openai_compatible)</label>
-            <input id="llm_base_url" name="llm_base_url" type="text" value="{{ form.llm_base_url }}" placeholder="https://.../v1" style="width: 100%; box-sizing: border-box; margin-bottom: 12px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px;">
-
-            <label for="llm_api_key">API Key (не сохраняется в файлы проекта)</label>
-            <input id="llm_api_key" name="llm_api_key" type="password" value="" autocomplete="off" style="width: 100%; box-sizing: border-box; margin-bottom: 12px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px;">
-
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button type="submit">Запустить анализ</button>
-                <button type="submit" formaction="/llm/check">Проверить LLM ключ</button>
-            </div>
+            <button type="submit">Запустить анализ</button>
         </form>
     </div>
 
