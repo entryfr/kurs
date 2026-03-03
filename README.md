@@ -62,7 +62,7 @@ python web_app.py
 
 ### Как включить LLM с ключом
 
-Поддерживаются 2 варианта:
+Поддерживаются 3 варианта:
 
 1) **Anthropic**
 ```bash
@@ -77,6 +77,16 @@ export LLM_PROVIDER="openai_compatible"
 export LLM_API_KEY="..."
 export LLM_BASE_URL="https://your-endpoint.example/v1"
 export LLM_MODEL="gpt-4o-mini"
+```
+
+3) **Cursor API**
+```bash
+export LLM_PROVIDER="cursor"
+export CURSOR_API_KEY="crsr_... или key_..."
+export CURSOR_BASE_URL="https://api.cursor.com"
+export CURSOR_LLM_PATH="/v1/chat/completions"
+export CURSOR_AUTH_MODE="bearer"
+export CURSOR_MODEL="gpt-4o-mini"
 ```
 
 В веб-форме можно передать ключ/провайдер прямо в запросе (ключ не сохраняется в файлы проекта).
@@ -122,10 +132,10 @@ curl -X POST "http://localhost:8000/api/analyze" \
 
 ```bash
 curl -X POST "http://localhost:8000/api/llm/check" \
-  -F "llm_provider=openai_compatible" \
+  -F "llm_provider=cursor" \
   -F "llm_api_key=..." \
   -F "llm_model=gpt-4o-mini" \
-  -F "llm_base_url=https://your-endpoint.example/v1"
+  -F "llm_base_url=https://api.cursor.com"
 ```
 
 ## Тесты

@@ -15,7 +15,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt", required=True, help="Инженерный запрос для агента")
     parser.add_argument("--miis-xml", default=None, help="Опциональный MIIS XML с учтёнными коммуникациями")
     parser.add_argument("--output-dir", default="output_v2", help="Каталог для результатов")
-    parser.add_argument("--llm-provider", default="auto", choices=["auto", "anthropic", "openai_compatible"], help="Провайдер LLM")
+    parser.add_argument(
+        "--llm-provider",
+        default="auto",
+        choices=["auto", "anthropic", "openai_compatible", "cursor"],
+        help="Провайдер LLM",
+    )
     parser.add_argument("--llm-api-key", default=None, help="API ключ LLM (опционально)")
     parser.add_argument("--llm-model", default=None, help="Имя модели LLM (опционально)")
     parser.add_argument("--llm-base-url", default=None, help="Base URL для openai_compatible")

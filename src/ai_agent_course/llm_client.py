@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import base64
 from dataclasses import dataclass
 from typing import Any
 from urllib import error as url_error
@@ -19,6 +20,15 @@ class LLMConfig:
     model: str
     base_url: str | None = None
     timeout_seconds: float = 25.0
+    endpoint_path: str = "/chat/completions"
+    auth_mode: str = "bearer"
+
+
+def _first_non_empty(*values: str | None) -> str:
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 def resolve_llm_config(
@@ -29,7 +39,7 @@ def resolve_llm_config(
 ) -> LLMConfig:
     requested_provider = (provider or os.getenv("LLM_PROVIDER", "auto")).strip().lower()
 
-    anthropic_key = (api_key or os.getenv("ANTHROPIC_API_KEY", "")).strip()
+    anthropic_key = _first_non_empty(api_key, os.getenv("ANTHROPIC_API_KEY"))
     if requested_provider in {"auto", "anthropic"} and anthropic_key:
         return LLMConfig(
             provider="anthropic",
@@ -38,10 +48,24 @@ def resolve_llm_config(
             timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
         )
 
-    generic_key = (api_key or os.getenv("LLM_API_KEY", "") or os.getenv("OPENAI_API_KEY", "") or os.getenv("CURSOR_API_KEY", "")).strip()
-    generic_base = (
-        (base_url or os.getenv("LLM_BASE_URL", "") or os.getenv("OPENAI_BASE_URL", "") or os.getenv("CURSOR_BASE_URL", "")).strip()
-    )
+    cursor_key = _first_non_empty(api_key, os.getenv("CURSOR_API_KEY"))
+    if requested_provider in {"auto", "cursor"} and cursor_key:
+        if requested_provider == "cursor" or cursor_key.startswith(("crsr_", "key_")):
+            cursor_base = _first_non_empty(base_url, os.getenv("CURSOR_BASE_URL"), "https://api.cursor.com")
+            cursor_path = _first_non_empty(os.getenv("CURSOR_LLM_PATH"), "/v1/chat/completions")
+            auth_mode = _first_non_empty(os.getenv("CURSOR_AUTH_MODE"), "bearer").lower()
+            return LLMConfig(
+                provider="cursor",
+                api_key=cursor_key,
+                model=(model or os.getenv("CURSOR_MODEL", "gpt-4o-mini")).strip(),
+                base_url=cursor_base.rstrip("/"),
+                timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
+                endpoint_path=cursor_path if cursor_path.startswith("/") else f"/{cursor_path}",
+                auth_mode=auth_mode if auth_mode in {"bearer", "basic"} else "bearer",
+            )
+
+    generic_key = _first_non_empty(api_key, os.getenv("LLM_API_KEY"), os.getenv("OPENAI_API_KEY"))
+    generic_base = _first_non_empty(base_url, os.getenv("LLM_BASE_URL"), os.getenv("OPENAI_BASE_URL"))
     if requested_provider in {"auto", "openai_compatible"} and generic_key and generic_base:
         return LLMConfig(
             provider="openai_compatible",
@@ -49,9 +73,38 @@ def resolve_llm_config(
             model=(model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip(),
             base_url=generic_base.rstrip("/"),
             timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
+            endpoint_path="/chat/completions",
+            auth_mode="bearer",
         )
 
     return LLMConfig(provider="none", api_key=None, model="none", base_url=None)
+
+
+def _parse_completion_response(raw: str) -> str:
+    decoded = json.loads(raw)
+    choices = decoded.get("choices", [])
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if content:
+            return str(content).strip()
+        text = choices[0].get("text")
+        if text:
+            return str(text).strip()
+
+    output_text = decoded.get("output_text")
+    if output_text:
+        return str(output_text).strip()
+
+    message = decoded.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    if isinstance(message, dict):
+        content = message.get("content")
+        if content:
+            return str(content).strip()
+
+    raise ValueError("Не удалось извлечь текст из ответа LLM endpoint")
 
 
 def _call_openai_compatible(config: LLMConfig, prompt: str) -> str:
@@ -64,7 +117,7 @@ def _call_openai_compatible(config: LLMConfig, prompt: str) -> str:
         "max_tokens": 900,
     }
     body = json.dumps(payload).encode("utf-8")
-    endpoint = f"{config.base_url}/chat/completions"
+    endpoint = f"{config.base_url}{config.endpoint_path}"
 
     req = url_request.Request(
         endpoint,
@@ -77,15 +130,37 @@ def _call_openai_compatible(config: LLMConfig, prompt: str) -> str:
     )
     with url_request.urlopen(req, timeout=config.timeout_seconds) as response:
         raw = response.read().decode("utf-8")
-    decoded = json.loads(raw)
-    choices = decoded.get("choices", [])
-    if not choices:
-        raise ValueError("Пустой ответ от openai-compatible endpoint")
-    message = choices[0].get("message", {})
-    content = message.get("content")
-    if not content:
-        raise ValueError("Отсутствует content в ответе openai-compatible endpoint")
-    return str(content).strip()
+    return _parse_completion_response(raw)
+
+
+def _call_cursor(config: LLMConfig, prompt: str) -> str:
+    assert config.base_url is not None
+    assert config.api_key is not None
+    payload = {
+        "model": config.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 900,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    endpoint = f"{config.base_url}{config.endpoint_path}"
+
+    headers = {"Content-Type": "application/json"}
+    if config.auth_mode == "basic":
+        token = base64.b64encode(f"{config.api_key}:".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+    else:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+
+    req = url_request.Request(
+        endpoint,
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    with url_request.urlopen(req, timeout=config.timeout_seconds) as response:
+        raw = response.read().decode("utf-8")
+    return _parse_completion_response(raw)
 
 
 def build_engineering_answer(
@@ -125,6 +200,10 @@ def build_engineering_answer(
         if config.provider == "openai_compatible":
             answer = _call_openai_compatible(config, prompt_text)
             return answer, "llm_openai_compatible"
+
+        if config.provider == "cursor":
+            answer = _call_cursor(config, prompt_text)
+            return answer, "llm_cursor"
 
         return "", f"fallback_unknown_provider:{config.provider}"
     except (url_error.URLError, TimeoutError, ValueError, Exception) as exc:  # noqa: BLE001
@@ -181,6 +260,21 @@ def check_llm_connectivity(config: LLMConfig) -> dict[str, Any]:
                     if ok
                     else f"Неожиданный ответ: {content}"
                 ),
+                "latency_ms": latency_ms,
+            }
+
+        if config.provider == "cursor":
+            content = _call_cursor(config, "Ответь строго одним словом: OK")
+            ok = "ok" in content.lower()
+            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            return {
+                "ok": ok,
+                "provider": config.provider,
+                "model": config.model,
+                "base_url": config.base_url,
+                "auth_mode": config.auth_mode,
+                "endpoint_path": config.endpoint_path,
+                "message": "Подключение к Cursor endpoint проверено." if ok else f"Неожиданный ответ: {content}",
                 "latency_ms": latency_ms,
             }
 

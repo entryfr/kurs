@@ -61,6 +61,17 @@ LLM_BASE_URL=https://your-endpoint.example/v1
 LLM_MODEL=gpt-4o-mini
 ```
 
+### Вариант C (Cursor API)
+
+```env
+LLM_PROVIDER=cursor
+CURSOR_API_KEY=crsr_xxx_or_key_xxx
+CURSOR_BASE_URL=https://api.cursor.com
+CURSOR_LLM_PATH=/v1/chat/completions
+CURSOR_AUTH_MODE=bearer
+CURSOR_MODEL=gpt-4o-mini
+```
+
 > `.env.local` не коммитится в git.
 
 ---
@@ -113,10 +124,10 @@ API-эквивалент:
 
 ```bash
 curl -X POST "http://localhost:8000/api/llm/check" \
-  -F "llm_provider=openai_compatible" \
+  -F "llm_provider=cursor" \
   -F "llm_api_key=..." \
   -F "llm_model=gpt-4o-mini" \
-  -F "llm_base_url=https://your-endpoint.example/v1"
+  -F "llm_base_url=https://api.cursor.com"
 ```
 
 ---

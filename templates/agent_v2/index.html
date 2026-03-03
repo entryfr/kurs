@@ -40,6 +40,7 @@
                 <option value="auto" {% if form.llm_provider == "auto" %}selected{% endif %}>auto</option>
                 <option value="anthropic" {% if form.llm_provider == "anthropic" %}selected{% endif %}>anthropic</option>
                 <option value="openai_compatible" {% if form.llm_provider == "openai_compatible" %}selected{% endif %}>openai_compatible</option>
+                <option value="cursor" {% if form.llm_provider == "cursor" %}selected{% endif %}>cursor</option>
             </select>
 
             <label for="llm_model">Модель (опционально)</label>
