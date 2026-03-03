@@ -34,6 +34,16 @@ pip install -r requirements.txt
 
 ## 3) Настройка ключа LLM
 
+### Вариант 0 (самый простой)
+
+Открой файл `src/ai_agent_course/local_key.py` и вставь ключ в:
+
+```python
+CURSOR_API_KEY = "PASTE_YOUR_CURSOR_API_KEY_HERE"
+```
+
+Этого уже достаточно для запуска через Cursor API.
+
 Создай файл:
 
 ```bash

@@ -12,6 +12,11 @@ from urllib import request as url_request
 
 logger = logging.getLogger(__name__)
 
+try:
+    from src.ai_agent_course import local_key
+except Exception:  # noqa: BLE001
+    local_key = None
+
 
 @dataclass(slots=True)
 class LLMConfig:
@@ -48,16 +53,34 @@ def resolve_llm_config(
             timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
         )
 
-    cursor_key = _first_non_empty(api_key, os.getenv("CURSOR_API_KEY"))
+    local_cursor_key = ""
+    local_cursor_base = ""
+    local_cursor_path = ""
+    local_cursor_auth = ""
+    local_cursor_model = ""
+    if local_key is not None:
+        local_cursor_key = _first_non_empty(getattr(local_key, "CURSOR_API_KEY", ""))
+        local_cursor_base = _first_non_empty(getattr(local_key, "CURSOR_BASE_URL", ""))
+        local_cursor_path = _first_non_empty(getattr(local_key, "CURSOR_LLM_PATH", ""))
+        local_cursor_auth = _first_non_empty(getattr(local_key, "CURSOR_AUTH_MODE", ""))
+        local_cursor_model = _first_non_empty(getattr(local_key, "CURSOR_MODEL", ""))
+        if local_cursor_key == "PASTE_YOUR_CURSOR_API_KEY_HERE":
+            local_cursor_key = ""
+
+    cursor_key = _first_non_empty(api_key, os.getenv("CURSOR_API_KEY"), local_cursor_key)
     if requested_provider in {"auto", "cursor"} and cursor_key:
         if requested_provider == "cursor" or cursor_key.startswith(("crsr_", "key_")):
-            cursor_base = _first_non_empty(base_url, os.getenv("CURSOR_BASE_URL"), "https://api.cursor.com")
-            cursor_path = _first_non_empty(os.getenv("CURSOR_LLM_PATH"), "/v1/chat/completions")
-            auth_mode = _first_non_empty(os.getenv("CURSOR_AUTH_MODE"), "bearer").lower()
+            cursor_base = _first_non_empty(
+                base_url, os.getenv("CURSOR_BASE_URL"), local_cursor_base, "https://api.cursor.com"
+            )
+            cursor_path = _first_non_empty(
+                os.getenv("CURSOR_LLM_PATH"), local_cursor_path, "/v1/chat/completions"
+            )
+            auth_mode = _first_non_empty(os.getenv("CURSOR_AUTH_MODE"), local_cursor_auth, "bearer").lower()
             return LLMConfig(
                 provider="cursor",
                 api_key=cursor_key,
-                model=(model or os.getenv("CURSOR_MODEL", "gpt-4o-mini")).strip(),
+                model=(model or _first_non_empty(os.getenv("CURSOR_MODEL"), local_cursor_model, "gpt-4o-mini")).strip(),
                 base_url=cursor_base.rstrip("/"),
                 timeout_seconds=float(os.getenv("LLM_TIMEOUT_SEC", "25")),
                 endpoint_path=cursor_path if cursor_path.startswith("/") else f"/{cursor_path}",

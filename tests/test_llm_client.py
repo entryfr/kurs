@@ -39,6 +39,14 @@ def test_resolve_llm_config_cursor_auto(monkeypatch) -> None:
     assert cfg.base_url == "https://api.cursor.com"
 
 
+def test_resolve_llm_config_cursor_from_local_key(monkeypatch) -> None:
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.setattr(llm_client.local_key, "CURSOR_API_KEY", "crsr_local_key", raising=False)
+    cfg = llm_client.resolve_llm_config(provider="cursor")
+    assert cfg.provider == "cursor"
+    assert cfg.api_key == "crsr_local_key"
+
+
 def test_build_engineering_answer_openai_compatible(monkeypatch) -> None:
     class _FakeResponse:
         def __init__(self, payload: dict):

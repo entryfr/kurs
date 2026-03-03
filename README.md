@@ -89,6 +89,18 @@ export CURSOR_AUTH_MODE="bearer"
 export CURSOR_MODEL="gpt-4o-mini"
 ```
 
+### Самый простой вариант (без env и без полей формы)
+
+Открой файл:
+- `src/ai_agent_course/local_key.py`
+
+И вставь ключ сюда:
+```python
+CURSOR_API_KEY = "PASTE_YOUR_CURSOR_API_KEY_HERE"
+```
+
+После этого просто запускай `python web_app.py`.
+
 В веб-форме можно передать ключ/провайдер прямо в запросе (ключ не сохраняется в файлы проекта).
 Также есть кнопка **«Проверить LLM ключ»** — выполняет тестовый пинг провайдера.
 
